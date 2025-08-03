@@ -1,48 +1,49 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 
 const app = express();
-
-// ✅ Serve static files from the project root (not "public")
-app.use(express.static(path.join(__dirname)));
-
 const server = http.createServer(app);
 const io = socketIo(server);
 
-// ✅ Optional: redirect root (/) to index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+// ✅ Serve static files from the root (so index.html, script.js etc. load)
+app.use(express.static(path.join(__dirname)));
+
+// ✅ Send index.html at root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Track rooms and users
-const rooms = {};  // roomId => { broadcaster, viewers: Set }
+// 🔁 Track rooms and participants
+const rooms = {}; // roomId => { broadcaster, viewers: Set }
 
-io.on('connection', socket => {
-  console.log("🔌 New client connected:", socket.id);
+io.on('connection', (socket) => {
+  console.log('🔌 Connected:', socket.id);
 
-  socket.on('broadcaster', roomId => {
+  // 📡 Broadcaster joins
+  socket.on('broadcaster', (roomId) => {
     socket.join(roomId);
     rooms[roomId] = rooms[roomId] || { broadcaster: null, viewers: new Set() };
     rooms[roomId].broadcaster = socket.id;
-    console.log(`🎥 Broadcaster joined room ${roomId}: ${socket.id}`);
+    console.log(`🎥 Broadcaster joined ${roomId}: ${socket.id}`);
   });
 
-  socket.on('watcher', roomId => {
+  // 👁️ Viewer joins
+  socket.on('watcher', (roomId) => {
     socket.join(roomId);
-    if (!rooms[roomId]) rooms[roomId] = { broadcaster: null, viewers: new Set() };
+    rooms[roomId] = rooms[roomId] || { broadcaster: null, viewers: new Set() };
     rooms[roomId].viewers.add(socket.id);
 
-    const broadcasterId = rooms[roomId].broadcaster;
-    if (broadcasterId) {
-      io.to(broadcasterId).emit('watcher', socket.id);
+    const broadcaster = rooms[roomId].broadcaster;
+    if (broadcaster) {
+      io.to(broadcaster).emit('watcher', socket.id);
     }
 
     io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
   });
 
+  // 🔁 Signal exchange
   socket.on('offer', (id, message) => {
     io.to(id).emit('offer', socket.id, message);
   });
@@ -51,31 +52,41 @@ io.on('connection', socket => {
     io.to(id).emit('answer', socket.id, message);
   });
 
+  // 💬 Chat messages
   socket.on('chat', ({ roomId, msg, sender }) => {
     io.to(roomId).emit('chat', { sender, msg });
   });
 
+  // 🎉 Emojis
   socket.on('emoji', ({ roomId, emoji }) => {
     io.to(roomId).emit('emoji', { emoji });
   });
 
-  socket.on('raise-hand', roomId => {
+  // ✋ Raise hand
+  socket.on('raise-hand', (roomId) => {
     io.to(roomId).emit('raise-hand');
   });
 
+  // ❌ Disconnect handling
   socket.on('disconnect', () => {
     for (const roomId in rooms) {
       const room = rooms[roomId];
+      if (!room) continue;
 
+      // Broadcaster disconnect
       if (room.broadcaster === socket.id) {
-        console.log(`❌ Broadcaster left room ${roomId}`);
+        console.log(`❌ Broadcaster disconnected from ${roomId}`);
         io.to(roomId).emit('disconnectPeer', socket.id);
         for (const viewerId of room.viewers) {
           io.to(viewerId).emit('disconnectPeer', viewerId);
         }
         delete rooms[roomId];
-      } else if (room.viewers.has(socket.id)) {
-        console.log(`👤 Viewer left room ${roomId}`);
+        return;
+      }
+
+      // Viewer disconnect
+      if (room.viewers.has(socket.id)) {
+        console.log(`👤 Viewer disconnected from ${roomId}`);
         room.viewers.delete(socket.id);
         if (room.broadcaster) {
           io.to(room.broadcaster).emit('disconnectPeer', socket.id);
@@ -86,8 +97,8 @@ io.on('connection', socket => {
   });
 });
 
-// ✅ Port setup for Render
+// 🔁 Render-compatible port
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });

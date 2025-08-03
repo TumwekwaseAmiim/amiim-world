@@ -116,7 +116,6 @@ socket.on('offer', (id, desc) => {
   peer.on('signal', data => socket.emit('answer', id, data));
   peer.on('stream', stream => {
     if (isBroadcaster) {
-      // viewer stream → add to viewer grid
       const video = document.createElement('video');
       video.autoplay = true;
       video.playsInline = true;
@@ -124,7 +123,6 @@ socket.on('offer', (id, desc) => {
       video.setAttribute('data-peer', id);
       document.getElementById('viewerStreams')?.appendChild(video);
     } else {
-      // broadcaster stream → main video
       videoElement.srcObject = stream;
     }
   });
@@ -180,4 +178,8 @@ socket.on('disconnectPeer', id => {
     peerConnections[id].destroy();
     delete peerConnections[id];
     const video = document.querySelector(`video[data-peer="${id}"]`);
-    if (video
+    if (video) {
+      video.remove();
+    }
+  }
+});

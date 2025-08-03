@@ -1,12 +1,26 @@
 {
   "name": "amiim-live",
   "version": "1.0.0",
+  "description": "Amiim Live Broadcast Platform with WebRTC, Chat, and Events",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.2"
-  }
+  },
+  "keywords": [
+    "webrtc",
+    "live",
+    "streaming",
+    "amiim",
+    "video",
+    "socket.io"
+  ],
+  "author": "Eng. Amiim Tumwekwase",
+  "license": "MIT"
 }
