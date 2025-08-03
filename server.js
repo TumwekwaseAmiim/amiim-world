@@ -5,13 +5,19 @@ const socketIo = require('socket.io');
 const path = require('path');
 
 const app = express();
+
+// ✅ Serve static files from the project root (not "public")
+app.use(express.static(path.join(__dirname)));
+
 const server = http.createServer(app);
 const io = socketIo(server);
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
+// ✅ Optional: redirect root (/) to index.html
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
-// Room tracking
+// Track rooms and users
 const rooms = {};  // roomId => { broadcaster, viewers: Set }
 
 io.on('connection', socket => {
@@ -34,7 +40,6 @@ io.on('connection', socket => {
       io.to(broadcasterId).emit('watcher', socket.id);
     }
 
-    // Send updated viewer count
     io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
   });
 
@@ -72,13 +77,16 @@ io.on('connection', socket => {
       } else if (room.viewers.has(socket.id)) {
         console.log(`👤 Viewer left room ${roomId}`);
         room.viewers.delete(socket.id);
-        io.to(room.broadcaster).emit('disconnectPeer', socket.id);
+        if (room.broadcaster) {
+          io.to(room.broadcaster).emit('disconnectPeer', socket.id);
+        }
         io.to(roomId).emit('viewer-count', room.viewers.size);
       }
     }
   });
 });
 
+// ✅ Port setup for Render
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
