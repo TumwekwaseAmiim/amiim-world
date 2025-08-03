@@ -1,0 +1,44 @@
+<!-- viewer.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🎦 Viewer - Amiim Live Events</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <h1>🎦 Viewer - Join Live Broadcast</h1>
+
+  <div class="controls">
+    <input type="text" id="roomId" placeholder="Enter Room ID" />
+    <button onclick="joinBroadcast()">Join Broadcast</button>
+  </div>
+
+  <h3 id="streamMode">📺 Mode: Slides</h3>
+
+  <video id="mainVideo" autoplay playsinline></video>
+
+  <div id="viewerCount">👥 Viewers: 1</div>
+
+  <textarea id="chat-box" class="chat-box" readonly placeholder="Chat with host..."></textarea>
+  <input type="text" id="chat-input" placeholder="Type message..." />
+  <button onclick="sendMessage()">Send</button>
+
+  <div style="margin-top: 10px;">
+    <button onclick="sendEmoji('👍')">👍</button>
+    <button onclick="sendEmoji('❤️')">❤️</button>
+    <button onclick="sendEmoji('👏')">👏</button>
+    <button onclick="raiseHand()">✋ Raise Hand</button>
+  </div>
+
+  <!-- Background music playback -->
+  <audio id="bgMusic" autoplay loop>
+    <source src="bring_me.mp3" type="audio/mpeg" />
+  </audio>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="simplepeer.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
