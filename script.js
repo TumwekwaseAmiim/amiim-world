@@ -1,4 +1,3 @@
-// script.js
 const socket = io();
 let peerConnections = {};
 let localStream;
@@ -12,6 +11,10 @@ const chatInput = document.getElementById('chat-input');
 const streamModeLabel = document.getElementById('streamMode');
 const viewerCountDisplay = document.getElementById('viewerCount');
 const bgMusic = document.getElementById('bgMusic');
+
+// For viewers
+const selfVideo = document.getElementById('selfVideo');
+let viewerStream = null;
 
 // ---------- BROADCASTER FUNCTIONS ----------
 async function startBroadcast() {
@@ -61,11 +64,19 @@ function setLocalStream(stream) {
 }
 
 // ---------- VIEWER FUNCTIONS ----------
-function joinBroadcast() {
+async function joinBroadcast() {
   roomId = document.getElementById('roomId').value.trim();
   if (!roomId) return alert("Enter Room ID");
 
-  socket.emit('watcher', roomId);
+  try {
+    viewerStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    if (selfVideo) {
+      selfVideo.srcObject = viewerStream;
+    }
+    socket.emit('watcher', roomId);
+  } catch (err) {
+    alert("Camera/Mic access denied: " + err.message);
+  }
 }
 
 function sendMessage() {
@@ -103,8 +114,22 @@ function toggleMusic() {
 socket.on('offer', (id, desc) => {
   const peer = new SimplePeer({ initiator: false, trickle: false });
   peer.on('signal', data => socket.emit('answer', id, data));
-  peer.on('stream', stream => videoElement.srcObject = stream);
+  peer.on('stream', stream => {
+    if (isBroadcaster) {
+      // viewer stream → add to viewer grid
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      video.setAttribute('data-peer', id);
+      document.getElementById('viewerStreams')?.appendChild(video);
+    } else {
+      // broadcaster stream → main video
+      videoElement.srcObject = stream;
+    }
+  });
   peer.signal(desc);
+  peerConnections[id] = peer;
 });
 
 socket.on('answer', (id, desc) => {
@@ -112,9 +137,21 @@ socket.on('answer', (id, desc) => {
 });
 
 socket.on('watcher', id => {
-  const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
+  if (!isBroadcaster) return;
+
+  const peer = new SimplePeer({
+    initiator: true,
+    trickle: false,
+    stream: localStream
+  });
+
   peer.on('signal', data => socket.emit('offer', id, data));
-  peer.on('close', () => delete peerConnections[id]);
+  peer.on('close', () => {
+    delete peerConnections[id];
+    const video = document.querySelector(`video[data-peer="${id}"]`);
+    if (video) video.remove();
+  });
+
   peerConnections[id] = peer;
 });
 
@@ -142,5 +179,5 @@ socket.on('disconnectPeer', id => {
   if (peerConnections[id]) {
     peerConnections[id].destroy();
     delete peerConnections[id];
-  }
-});
+    const video = document.querySelector(`video[data-peer="${id}"]`);
+    if (video
