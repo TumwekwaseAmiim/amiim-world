@@ -1,4 +1,3 @@
-<!-- viewer.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,16 +11,14 @@
 
   <div class="controls">
     <input type="text" id="roomId" placeholder="Enter Room ID" />
+    <input type="text" id="viewerName" placeholder="Your Name" />
     <button onclick="joinBroadcast()">Join Broadcast</button>
   </div>
 
   <h3 id="streamMode">📺 Mode: Slides</h3>
 
-  <!-- Viewer's own camera preview -->
-  <video id="selfVideo" autoplay playsinline muted></video>
-
-  <!-- Host video stream -->
-  <video id="mainVideo" autoplay playsinline></video>
+  <video id="selfVideo" autoplay playsinline muted style="width: 200px; border: 1px solid white; margin-top: 10px;"></video>
+  <video id="mainVideo" autoplay playsinline style="width: 90%; max-width: 800px; border: 2px solid #00ffcc; margin-top: 10px;"></video>
 
   <div id="viewerCount">👥 Viewers: 1</div>
 
@@ -34,15 +31,95 @@
     <button onclick="sendEmoji('❤️')">❤️</button>
     <button onclick="sendEmoji('👏')">👏</button>
     <button onclick="raiseHand()">✋ Raise Hand</button>
+    <button onclick="toggleMic()" id="micToggleBtn">🎧 Mute</button>
   </div>
-
-  <!-- Background music playback -->
-  <audio id="bgMusic" autoplay loop>
-    <source src="bring_me.mp3" type="audio/mpeg" />
-  </audio>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="simplepeer.min.js"></script>
-  <script src="script.js"></script>
+  <script>
+    const socket = io();
+    let viewerStream = null;
+    let isMicMuted = false;
+
+    const videoElement = document.getElementById('mainVideo');
+    const selfVideo = document.getElementById('selfVideo');
+    const chatBox = document.getElementById('chat-box');
+    const chatInput = document.getElementById('chat-input');
+    const viewerCountDisplay = document.getElementById('viewerCount');
+    const streamModeLabel = document.getElementById('streamMode');
+    const micToggleBtn = document.getElementById('micToggleBtn');
+
+    function appendMessage(msg) {
+      chatBox.value += msg + '\n';
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function joinBroadcast() {
+      const roomId = document.getElementById('roomId').value.trim();
+      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
+      if (!roomId) return alert('Enter Room ID');
+
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          viewerStream = stream;
+          selfVideo.srcObject = stream;
+          socket.emit('watcher', { roomId, viewerName });
+        })
+        .catch(err => alert('Mic/Camera error: ' + err.message));
+    }
+
+    function sendMessage() {
+      const roomId = document.getElementById('roomId').value.trim();
+      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      socket.emit('chat', { roomId, msg, sender: `🔹 ${viewerName}` });
+      appendMessage(`Me: ${msg}`);
+      chatInput.value = "";
+    }
+
+    function sendEmoji(emoji) {
+      const roomId = document.getElementById('roomId').value.trim();
+      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
+      socket.emit('emoji', { roomId, emoji, sender: `🔹 ${viewerName}` });
+      appendMessage(`You: ${emoji}`);
+    }
+
+    function raiseHand() {
+      const roomId = document.getElementById('roomId').value.trim();
+      socket.emit('raise-hand', roomId);
+      appendMessage('✋ You raised your hand');
+    }
+
+    function toggleMic() {
+      if (!viewerStream) return;
+      const audioTrack = viewerStream.getAudioTracks()[0];
+      if (!audioTrack) return;
+      isMicMuted = !isMicMuted;
+      audioTrack.enabled = !isMicMuted;
+      micToggleBtn.innerText = isMicMuted ? '🎧 Unmute' : '🎧 Mute';
+      appendMessage(isMicMuted ? '🔇 Mic muted' : '🎙️ Mic unmuted');
+    }
+
+    socket.on('chat', ({ sender, msg }) => {
+      appendMessage(`${sender}: ${msg}`);
+    });
+
+    socket.on('emoji', ({ sender, emoji }) => {
+      appendMessage(`${sender}: ${emoji}`);
+    });
+
+    socket.on('raise-hand', () => {
+      appendMessage('✋ A viewer raised their hand');
+    });
+
+    socket.on('viewer-count', count => {
+      viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
+    });
+
+    socket.on('stream-mode', mode => {
+      streamModeLabel.innerText = mode === 'event' ? '📺 Mode: Event' : '📺 Mode: Slides';
+    });
+  </script>
 </body>
 </html>

@@ -1,5 +1,4 @@
-/* style.css */
-
+/* General Body */
 body {
   margin: 0;
   padding: 0;
@@ -53,6 +52,23 @@ h1 {
   border-radius: 8px;
 }
 
+/* Viewer Video Grid */
+#viewerStreams {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+#viewerStreams video {
+  width: 180px;
+  height: 135px;
+  border: 2px solid #555;
+  border-radius: 6px;
+}
+
+/* Viewer Count & Mode */
 #viewerCount {
   margin-top: 10px;
   font-size: 18px;
@@ -66,6 +82,7 @@ h1 {
   color: #ffc107;
 }
 
+/* Chat Box */
 .chat-box {
   width: 90%;
   max-width: 800px;
@@ -78,8 +95,11 @@ h1 {
   color: #0f0;
   resize: none;
   overflow-y: scroll;
+  font-family: monospace;
+  white-space: pre-wrap;
 }
 
+/* Chat Input */
 #chat-input {
   width: 70%;
   padding: 10px;
@@ -97,6 +117,29 @@ button[onclick="sendMessage()"] {
   color: #fff;
 }
 
+/* 🎨 Message Types */
+.chat-box .amiim {
+  color: #00ffff;
+  font-weight: bold;
+}
+
+.chat-box .viewer {
+  color: #ffff00;
+  font-weight: bold;
+}
+
+.chat-box .system {
+  color: #ff66ff;
+  font-style: italic;
+}
+
+.chat-box .emoji {
+  font-size: 22px;
+  display: inline-block;
+  margin: 2px;
+}
+
+/* 📱 Responsive Design */
 @media screen and (max-width: 600px) {
   .controls input,
   .controls button,
@@ -107,5 +150,10 @@ button[onclick="sendMessage()"] {
 
   #mainVideo {
     width: 100%;
+  }
+
+  #viewerStreams video {
+    width: 100px;
+    height: 80px;
   }
 }
