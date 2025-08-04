@@ -9,39 +9,51 @@
 <body>
   <h1>🎥 Broadcaster - Amiim Live Events</h1>
 
+  <!-- ✅ Welcome Banner -->
+  <div id="welcomeBanner">
+    👋 Welcome to <strong>Eng. Amiim Live Broadcast</strong> platform. Start your session and interact with viewers in real-time!
+  </div>
+
+  <!-- 🎛️ Broadcast Controls -->
   <div class="controls">
-    <input type="text" id="roomId" placeholder="Enter Room ID" />
+    <input type="text" id="broadcasterName" placeholder="👤 Your Name" />
+    <input type="text" id="roomId" placeholder="🔐 Room ID" />
     <button onclick="startBroadcast()">🎥 Start Broadcast</button>
     <button onclick="shareScreen()">🖥️ Share Slides/Screen</button>
     <button onclick="shareEvent()">📍 Show Event/Town</button>
-    <button onclick="backToSlides()" id="backBtn" style="display:none;">↩️ Back to Slides</button>
+    <button onclick="backToSlides()" id="backBtn" style="display: none;">↩️ Back to Slides</button>
   </div>
 
-  <h3 id="streamMode">📺 Mode: Slides</h3>
+  <!-- 📺 Stream Mode & Viewer Count -->
+  <div class="status-bar">
+    <h3 id="streamMode">📺 Mode: Slides</h3>
+    <div id="viewerCount">👥 Viewers: 0</div>
+  </div>
 
-  <!-- Main video stream from broadcaster -->
-  <video id="mainVideo" autoplay playsinline></video>
+  <!-- 📹 Video Preview -->
+  <video id="mainVideo" autoplay playsinline muted class="video-main"></video>
+  <video id="selfPreview" autoplay playsinline muted class="video-self"></video>
 
-  <!-- Viewer video streams appear here -->
-  <div id="viewerStreams" class="viewer-grid"></div>
-
-  <!-- Viewer management section -->
+  <!-- 🛠️ Viewer Management -->
   <div id="viewerControls">
     <h3>🎙️ Manage Viewers</h3>
     <ul id="viewerList"></ul>
   </div>
 
-  <!-- Viewer count -->
-  <div id="viewerCount">👥 Viewers: 0</div>
+  <!-- 💬 Chat Section -->
+  <div class="chat-container">
+    <textarea id="chat-box" class="chat-box" readonly placeholder="💬 Chat with viewers..."></textarea><br/>
+    <input type="text" id="chat-input" placeholder="✏️ Type message..." />
+    <button onclick="sendMessage()">Send</button>
+    <button onclick="toggleMic()">🎙️ Toggle Mic</button>
+    <button onclick="sendEmoji('👍')">👍</button>
+    <button onclick="sendEmoji('❤️')">❤️</button>
+    <button onclick="sendEmoji('👏')">👏</button>
+  </div>
 
-  <!-- Chat interface -->
-  <textarea id="chat-box" class="chat-box" readonly placeholder="Chat with viewers..."></textarea>
-  <input type="text" id="chat-input" placeholder="Type message..." />
-  <button onclick="sendMessage()">Send</button>
-
-  <!-- Libraries -->
+  <!-- 📜 Scripts -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="simplepeer.min.js"></script>
+  <script src="/simplepeer.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-/* General Body */
+/* 🌌 General Body */
 body {
   margin: 0;
   padding: 0;
@@ -8,11 +8,27 @@ body {
   text-align: center;
 }
 
+/* 🎥 Title */
 h1 {
   margin-top: 20px;
   color: #00ffcc;
+  font-size: 2em;
 }
 
+/* 👋 Welcome Banner */
+#welcomeBanner {
+  background: #111;
+  color: #00ffcc;
+  padding: 10px;
+  border-radius: 10px;
+  margin: 10px auto;
+  width: 90%;
+  max-width: 700px;
+  font-size: 1.1em;
+  box-shadow: 0 0 10px #00ffcc60;
+}
+
+/* 🎛️ Control Panel */
 .controls {
   margin: 20px 0;
 }
@@ -29,36 +45,77 @@ h1 {
 
 .controls input {
   width: 200px;
+  background-color: #222;
+  color: #fff;
 }
 
 .controls button {
   cursor: pointer;
   background-color: #007bff;
   color: white;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
-.controls button:hover {
+.controls button:hover,
+.controls button:focus {
   background-color: #0056b3;
+  transform: scale(1.05);
 }
 
+/* 📺 Status Bar */
+.status-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 30px;
+  margin-top: 10px;
+}
+
+/* 📺 Stream Mode */
+#streamMode {
+  font-size: 16px;
+  font-style: italic;
+  color: #ffc107;
+}
+
+/* 👥 Viewer Count */
+#viewerCount {
+  font-size: 18px;
+  color: #00ffcc;
+}
+
+/* 🎦 Broadcaster Main Video */
 #mainVideo {
   width: 90%;
   max-width: 1000px;
   height: auto;
-  margin: 10px auto;
+  margin: 20px auto;
   display: block;
-  border: 2px solid #00ffcc;
-  border-radius: 8px;
+  border: 3px solid #00ffcc;
+  border-radius: 10px;
+  background-color: #111;
 }
 
-/* Viewer Video Grid */
+/* 🎥 Broadcaster’s Floating Self Preview */
+#selfPreview {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 180px;
+  height: 135px;
+  border: 2px solid #00ffcc;
+  border-radius: 8px;
+  background-color: #111;
+  z-index: 1000;
+}
+
+/* 🧝 Viewer Video Grid (Optional if used) */
 #viewerStreams {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 20px;
 }
 
 #viewerStreams video {
@@ -66,77 +123,145 @@ h1 {
   height: 135px;
   border: 2px solid #555;
   border-radius: 6px;
+  background-color: #000;
 }
 
-/* Viewer Count & Mode */
-#viewerCount {
-  margin-top: 10px;
-  font-size: 18px;
-  color: #00ffcc;
+/* 💬 Chat Box */
+.chat-container {
+  margin-top: 30px;
 }
 
-#streamMode {
-  margin-top: 5px;
-  font-size: 16px;
-  font-style: italic;
-  color: #ffc107;
-}
-
-/* Chat Box */
 .chat-box {
   width: 90%;
   max-width: 800px;
   height: 150px;
-  margin: 20px auto 10px auto;
+  margin: 0 auto 10px auto;
   padding: 10px;
   border: 1px solid #ccc;
   border-radius: 8px;
   background: #111;
   color: #0f0;
   resize: none;
-  overflow-y: scroll;
+  overflow-y: auto;
   font-family: monospace;
   white-space: pre-wrap;
 }
 
-/* Chat Input */
+/* ✏️ Chat Input */
 #chat-input {
-  width: 70%;
+  width: 60%;
   padding: 10px;
   font-size: 16px;
   border-radius: 6px;
   border: none;
   margin-bottom: 10px;
+  background: #222;
+  color: #fff;
 }
 
+/* 📤 Chat Send Button */
 button[onclick="sendMessage()"] {
   padding: 10px 20px;
   font-size: 16px;
   background: #28a745;
   border-radius: 6px;
   color: #fff;
+  border: none;
+  margin-left: 5px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
 }
 
-/* 🎨 Message Types */
-.chat-box .amiim {
-  color: #00ffff;
-  font-weight: bold;
+button[onclick="sendMessage()"]:hover {
+  transform: scale(1.05);
 }
 
-.chat-box .viewer {
-  color: #ffff00;
-  font-weight: bold;
+/* 🎨 Emoji Buttons */
+button[onclick^="sendEmoji"] {
+  margin: 5px;
+  padding: 8px 12px;
+  font-size: 20px;
+  border-radius: 6px;
+  border: none;
+  background-color: #444;
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
-.chat-box .system {
-  color: #ff66ff;
-  font-style: italic;
+button[onclick^="sendEmoji"]:hover {
+  background-color: #666;
 }
 
-.chat-box .emoji {
-  font-size: 22px;
-  display: inline-block;
-  margin: 2px;
+/* 🎙️ Mic Toggle Button */
+button[onclick="toggleMic()"] {
+  background-color: #ff8800;
+  color: white;
+  padding: 10px 20px;
+  margin-left: 5px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button[onclick="toggleMic()"]:hover {
+  background-color: #e07000;
+}
+
+/* 🧑‍🤝‍🧑 Viewer Management */
+#viewerControls {
+  margin-top: 30px;
+  padding: 10px;
+  background: #111;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 0 10px #00ffcc30;
+}
+
+#viewerList {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+
+#viewerList li {
+  background: #222;
+  border: 1px solid #444;
+  padding: 10px;
+  margin: 5px 0;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#viewerList li button {
+  margin-left: 10px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #dc3545;
+  color: white;
+  transition: background-color 0.2s ease;
+}
+
+#viewerList li button:hover {
+  background-color: #c82333;
+}
+
+#viewerList li button:first-of-type {
+  background: #28a745;
+}
+
+#viewerList li button:first-of-type:hover {
+  background: #218838;
 }
 
 /* 📱 Responsive Design */
@@ -155,5 +280,20 @@ button[onclick="sendMessage()"] {
   #viewerStreams video {
     width: 100px;
     height: 80px;
+  }
+
+  #selfPreview {
+    width: 120px;
+    height: 90px;
+    bottom: 10px;
+    right: 10px;
+  }
+
+  #welcomeBanner {
+    font-size: 1em;
+  }
+
+  h1 {
+    font-size: 1.5em;
   }
 }

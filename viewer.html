@@ -5,28 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>🎦 Viewer - Amiim Live Events</title>
   <link rel="stylesheet" href="style.css" />
+  <style>
+    .animated-banner {
+      animation: pulse 2s infinite;
+      background: linear-gradient(to right, #fff200, #f9a602);
+      color: #000;
+      font-weight: bold;
+      text-align: center;
+      padding: 15px;
+      border-bottom: 4px solid #000;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.03); }
+      100% { transform: scale(1); }
+    }
+
+    .animated-banner strong {
+      color: #b30000;
+    }
+  </style>
 </head>
 <body>
-  <h1>🎦 Viewer - Join Live Broadcast</h1>
-
-  <div class="controls">
-    <input type="text" id="roomId" placeholder="Enter Room ID" />
-    <input type="text" id="viewerName" placeholder="Your Name" />
-    <button onclick="joinBroadcast()">Join Broadcast</button>
+  <!-- 🟡 Notification Banner -->
+  <div class="animated-banner">
+    💡 <strong>Thanks for loving Eng. Amiim!</strong><br/>
+    📢 No live video today – just test the chat and features.<br/>
+    🎥 <strong>Live test: August 5, 2025, from 2:00 PM to 2:10 PM</strong><br/>
+    📸 Send your screenshots to WhatsApp: <strong>0786598658</strong>
   </div>
 
-  <h3 id="streamMode">📺 Mode: Slides</h3>
+  <h1>🎦 Viewer - Join Live Broadcast</h1>
 
-  <video id="selfVideo" autoplay playsinline muted style="width: 200px; border: 1px solid white; margin-top: 10px;"></video>
-  <video id="mainVideo" autoplay playsinline style="width: 90%; max-width: 800px; border: 2px solid #00ffcc; margin-top: 10px;"></video>
+  <!-- 🔐 Room Entry Controls -->
+  <div class="controls">
+    <input type="text" id="roomId" placeholder="🔐 Enter Room ID" />
+    <input type="text" id="viewerName" placeholder="👤 Your Name" />
+    <button onclick="joinBroadcast()">📡 Join Broadcast</button>
+  </div>
 
-  <div id="viewerCount">👥 Viewers: 1</div>
+  <!-- 📝 Status -->
+  <h3 id="welcomeMessage">👋 Welcome to Eng. Amiim Live Broadcast Site, enjoy!</h3>
+  <h3 id="streamMode">📻 Mode: Slides</h3>
+  <div id="viewerCount">👥 Viewers: 0</div>
 
-  <textarea id="chat-box" class="chat-box" readonly placeholder="Chat with host..."></textarea>
-  <input type="text" id="chat-input" placeholder="Type message..." />
-  <button onclick="sendMessage()">Send</button>
+  <!-- 🎥 Video Display -->
+  <video id="selfVideo" autoplay playsinline muted></video>
+  <video id="mainVideo" autoplay playsinline></video>
 
-  <div style="margin-top: 10px;">
+  <!-- 💬 Chat Interface -->
+  <div class="chat-container">
+    <textarea id="chat-box" class="chat-box" readonly placeholder="💬 Chat with host..."></textarea><br />
+    <input type="text" id="chat-input" placeholder="✏️ Type message..." />
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <!-- 🎭 Reactions and Mic -->
+  <div class="viewer-actions">
     <button onclick="sendEmoji('👍')">👍</button>
     <button onclick="sendEmoji('❤️')">❤️</button>
     <button onclick="sendEmoji('👏')">👏</button>
@@ -34,92 +71,9 @@
     <button onclick="toggleMic()" id="micToggleBtn">🎧 Mute</button>
   </div>
 
+  <!-- 📜 Scripts -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="simplepeer.min.js"></script>
-  <script>
-    const socket = io();
-    let viewerStream = null;
-    let isMicMuted = false;
-
-    const videoElement = document.getElementById('mainVideo');
-    const selfVideo = document.getElementById('selfVideo');
-    const chatBox = document.getElementById('chat-box');
-    const chatInput = document.getElementById('chat-input');
-    const viewerCountDisplay = document.getElementById('viewerCount');
-    const streamModeLabel = document.getElementById('streamMode');
-    const micToggleBtn = document.getElementById('micToggleBtn');
-
-    function appendMessage(msg) {
-      chatBox.value += msg + '\n';
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function joinBroadcast() {
-      const roomId = document.getElementById('roomId').value.trim();
-      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
-      if (!roomId) return alert('Enter Room ID');
-
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(stream => {
-          viewerStream = stream;
-          selfVideo.srcObject = stream;
-          socket.emit('watcher', { roomId, viewerName });
-        })
-        .catch(err => alert('Mic/Camera error: ' + err.message));
-    }
-
-    function sendMessage() {
-      const roomId = document.getElementById('roomId').value.trim();
-      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
-      const msg = chatInput.value.trim();
-      if (!msg) return;
-      socket.emit('chat', { roomId, msg, sender: `🔹 ${viewerName}` });
-      appendMessage(`Me: ${msg}`);
-      chatInput.value = "";
-    }
-
-    function sendEmoji(emoji) {
-      const roomId = document.getElementById('roomId').value.trim();
-      const viewerName = document.getElementById('viewerName').value.trim() || 'Anonymous';
-      socket.emit('emoji', { roomId, emoji, sender: `🔹 ${viewerName}` });
-      appendMessage(`You: ${emoji}`);
-    }
-
-    function raiseHand() {
-      const roomId = document.getElementById('roomId').value.trim();
-      socket.emit('raise-hand', roomId);
-      appendMessage('✋ You raised your hand');
-    }
-
-    function toggleMic() {
-      if (!viewerStream) return;
-      const audioTrack = viewerStream.getAudioTracks()[0];
-      if (!audioTrack) return;
-      isMicMuted = !isMicMuted;
-      audioTrack.enabled = !isMicMuted;
-      micToggleBtn.innerText = isMicMuted ? '🎧 Unmute' : '🎧 Mute';
-      appendMessage(isMicMuted ? '🔇 Mic muted' : '🎙️ Mic unmuted');
-    }
-
-    socket.on('chat', ({ sender, msg }) => {
-      appendMessage(`${sender}: ${msg}`);
-    });
-
-    socket.on('emoji', ({ sender, emoji }) => {
-      appendMessage(`${sender}: ${emoji}`);
-    });
-
-    socket.on('raise-hand', () => {
-      appendMessage('✋ A viewer raised their hand');
-    });
-
-    socket.on('viewer-count', count => {
-      viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
-    });
-
-    socket.on('stream-mode', mode => {
-      streamModeLabel.innerText = mode === 'event' ? '📺 Mode: Event' : '📺 Mode: Slides';
-    });
-  </script>
+  <script src="viewer.js"></script>
 </body>
 </html>

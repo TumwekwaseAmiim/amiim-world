@@ -1,132 +1,27 @@
-// ✅ script.js (Updated Full Version with Grant Mic, Kick, Speaker Icon)
-
 const socket = io();
-let peerConnections = {};
-let localStream;
-let roomId;
-let isBroadcaster = false;
-let currentMode = "slides";
+let peers = {};
+let localStream = null;
+let currentRoomId = '';
+let streamMode = 'slides';
 let isMicMuted = false;
+let activeSpeaker = null;
 
-const videoElement = document.getElementById('mainVideo');
+// DOM references
+const mainVideo = document.getElementById('mainVideo');
+const selfPreview = document.getElementById('selfPreview');
 const chatBox = document.getElementById('chat-box');
 const chatInput = document.getElementById('chat-input');
-const streamModeLabel = document.getElementById('streamMode');
 const viewerCountDisplay = document.getElementById('viewerCount');
-const selfVideo = document.getElementById('selfVideo');
-let viewerStream = null;
+const streamModeLabel = document.getElementById('streamMode');
+const backBtn = document.getElementById('backBtn');
+const viewerList = document.getElementById('viewerList');
 
-const viewerName = prompt("Enter your name:") || "Anonymous";
-const iceConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ]
-};
-
-// ---------- BROADCASTER FUNCTIONS ----------
-async function startBroadcast() {
-  roomId = document.getElementById('roomId').value.trim();
-  if (!roomId) return alert("Enter Room ID");
-
-  isBroadcaster = true;
-  socket.emit('broadcaster', roomId);
-  await shareScreen();
+function getRoomId() {
+  return document.getElementById('roomId')?.value.trim();
 }
 
-async function shareScreen() {
-  try {
-    localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    setLocalStream(localStream);
-    streamModeLabel.innerText = "📺 Mode: Slides";
-    currentMode = "slides";
-    document.getElementById('backBtn')?.style?.display = "none";
-  } catch (err) {
-    alert("Error sharing screen: " + err.message);
-  }
-}
-
-async function shareEvent() {
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: true
-    });
-    setLocalStream(localStream);
-    streamModeLabel.innerText = "📺 Mode: Event";
-    currentMode = "event";
-    document.getElementById('backBtn')?.style?.display = "inline-block";
-  } catch (err) {
-    alert("Error accessing camera: " + err.message);
-  }
-}
-
-function backToSlides() {
-  shareScreen();
-}
-
-function setLocalStream(stream) {
-  videoElement.srcObject = stream;
-  for (let id in peerConnections) {
-    const pc = peerConnections[id];
-    const oldStream = pc.streams[0];
-    const newVideoTrack = stream.getVideoTracks()[0];
-    const newAudioTrack = stream.getAudioTracks()[0];
-
-    if (oldStream && newVideoTrack) {
-      const oldVideoTrack = oldStream.getVideoTracks()[0];
-      if (oldVideoTrack) pc.replaceTrack(oldVideoTrack, newVideoTrack, oldStream);
-    }
-    if (oldStream && newAudioTrack) {
-      const oldAudioTrack = oldStream.getAudioTracks()[0];
-      if (oldAudioTrack) pc.replaceTrack(oldAudioTrack, newAudioTrack, oldStream);
-    }
-  }
-}
-
-function grantMicToViewer(viewerId) {
-  socket.emit('grant-mic', viewerId);
-}
-
-function kickViewer(viewerId) {
-  socket.emit('kick-viewer', viewerId);
-}
-
-function createViewerControls(viewerId) {
-  const container = document.createElement('div');
-  container.id = `viewer-controls-${viewerId}`;
-  container.innerHTML = `
-    <button onclick="grantMicToViewer('${viewerId}')">🎤 Grant Mic</button>
-    <button onclick="kickViewer('${viewerId}')">❌ Kick</button>
-  `;
-  document.getElementById('viewerStreams')?.appendChild(container);
-}
-
-// ---------- VIEWER FUNCTIONS ----------
-async function joinBroadcast() {
-  roomId = document.getElementById('roomId').value.trim();
-  if (!roomId) return alert("Enter Room ID");
-
-  try {
-    viewerStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    if (selfVideo) selfVideo.srcObject = viewerStream;
-    viewerStream.getAudioTracks().forEach(track => (track.enabled = false));
-    socket.emit('watcher', roomId);
-  } catch (err) {
-    alert("Camera/Mic access denied: " + err.message);
-  }
-}
-
-function sendMessage() {
-  const msg = chatInput.value.trim();
-  if (!msg) return;
-  socket.emit('chat', { roomId, msg, sender: isBroadcaster ? '🟡 Amiim' : `🟢 ${viewerName}` });
-  appendMessage(`Me: ${msg}`);
-  chatInput.value = "";
+function getBroadcasterName() {
+  return document.getElementById('broadcasterName')?.value.trim() || 'Amiim';
 }
 
 function appendMessage(msg) {
@@ -134,84 +29,166 @@ function appendMessage(msg) {
   chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-function sendEmoji(emoji) {
-  socket.emit('emoji', { roomId, emoji, sender: `🟢 ${viewerName}` });
-  appendMessage(`You: ${emoji}`);
+// Start broadcast
+async function startBroadcast() {
+  const roomId = getRoomId();
+  const adminPassword = prompt("Enter Admin Password");
+  if (adminPassword !== 'amiim2025') return alert("Access Denied");
+  if (!roomId) return alert("Please enter Room ID");
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    handleNewStream(stream);
+    currentRoomId = roomId;
+    socket.emit('broadcaster', { roomId, broadcasterName: getBroadcasterName() });
+  } catch (err) {
+    alert("Media access denied: " + err.message);
+  }
 }
 
-function raiseHand() {
-  socket.emit('raise-hand', roomId);
-  appendMessage("✋ You raised your hand");
+// Share screen
+async function shareScreen() {
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    streamMode = 'slides';
+    streamModeLabel.innerText = '📺 Mode: Slides';
+    handleNewStream(stream);
+    socket.emit('stream-mode', { roomId: currentRoomId, mode: streamMode });
+    backBtn.style.display = 'none';
+  } catch (err) {
+    alert('Screen share error: ' + err.message);
+  }
 }
 
-function toggleMic() {
-  if (!viewerStream) return;
-  const audioTrack = viewerStream.getAudioTracks()[0];
-  if (!audioTrack) return;
-  isMicMuted = !isMicMuted;
-  audioTrack.enabled = !isMicMuted;
-  appendMessage(isMicMuted ? "🔇 Mic muted" : "🎙️ Mic unmuted");
+// Show event/camera
+async function shareEvent() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
+    streamMode = 'event';
+    streamModeLabel.innerText = '📺 Mode: Event';
+    handleNewStream(stream);
+    socket.emit('stream-mode', { roomId: currentRoomId, mode: streamMode });
+    backBtn.style.display = 'inline-block';
+  } catch (err) {
+    alert('Camera switch error: ' + err.message);
+  }
 }
 
-// ---------- SOCKET EVENTS ----------
-socket.on('offer', (id, desc) => {
-  const peer = new SimplePeer({ initiator: false, trickle: false, config: iceConfig });
-  peer.on('signal', data => socket.emit('answer', id, data));
-  peer.on('stream', stream => {
-    if (isBroadcaster) {
-      const video = document.createElement('video');
-      video.autoplay = true;
-      video.playsInline = true;
-      video.srcObject = stream;
-      video.setAttribute('data-peer', id);
-      document.getElementById('viewerStreams')?.appendChild(video);
-      createViewerControls(id);
-    } else {
-      videoElement.srcObject = stream;
+function backToSlides() {
+  shareScreen();
+}
+
+function handleNewStream(newStream) {
+  if (!newStream) return;
+
+  mainVideo.srcObject = newStream;
+  selfPreview.srcObject = newStream;
+  localStream = newStream;
+
+  for (const viewerId in peers) {
+    const peer = peers[viewerId];
+    const senders = peer._pc.getSenders();
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    const newAudioTrack = newStream.getAudioTracks()[0];
+
+    if (newVideoTrack) {
+      const videoSender = senders.find(s => s.track?.kind === 'video');
+      if (videoSender) videoSender.replaceTrack(newVideoTrack);
+    }
+    if (newAudioTrack) {
+      const audioSender = senders.find(s => s.track?.kind === 'audio');
+      if (audioSender) audioSender.replaceTrack(newAudioTrack);
+    }
+  }
+}
+
+// Watcher joins
+socket.on('watcher', ({ viewerId, viewerName }) => {
+  if (peers[viewerId]) {
+    peers[viewerId].destroy();
+    delete peers[viewerId];
+    document.getElementById(viewerId)?.remove();
+  }
+  if (!localStream) return;
+
+  const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
+
+  peer.on('signal', signal => {
+    if (signal.type === 'offer' || signal.candidate) {
+      socket.emit('signal', { roomId: currentRoomId, viewerId, signal });
     }
   });
-  peerConnections[id] = peer;
-  peer.signal(desc);
-});
 
-socket.on('answer', (id, desc) => {
-  peerConnections[id]?.signal(desc);
-});
-
-socket.on('watcher', id => {
-  if (!isBroadcaster) return;
-  const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream, config: iceConfig });
-  peer.on('signal', data => socket.emit('offer', id, data));
+  peer.on('connect', () => console.log(`✅ Connected to ${viewerName}`));
+  peer.on('error', err => console.error(`❌ Peer error:`, err));
   peer.on('close', () => {
-    delete peerConnections[id];
-    document.querySelector(`video[data-peer="${id}"]`)?.remove();
-    document.getElementById(`viewer-controls-${id}`)?.remove();
+    delete peers[viewerId];
+    document.getElementById(viewerId)?.remove();
   });
-  peerConnections[id] = peer;
+
+  peers[viewerId] = peer;
+  const li = document.createElement('li');
+  li.id = viewerId;
+  li.innerHTML = `${viewerName} <span id="mic-${viewerId}"></span> <button onclick="grantMic('${viewerId}')">🎤 Allow Mic</button> <button onclick="kickViewer('${viewerId}')">❌ Kick</button>`;
+  viewerList.appendChild(li);
 });
 
-socket.on('chat', ({ sender, msg }) => appendMessage(`${sender}: ${msg}`));
-socket.on('emoji', ({ emoji, sender }) => appendMessage(`${sender}: ${emoji}`));
-socket.on('raise-hand', () => appendMessage("✋ A viewer raised their hand"));
-socket.on('viewer-count', count => viewerCountDisplay.innerText = `👥 Viewers: ${count}`);
-socket.on('stream-mode', mode => streamModeLabel.innerText = mode === 'event' ? "📺 Mode: Event" : "📺 Mode: Slides");
-socket.on('disconnectPeer', id => {
-  peerConnections[id]?.destroy();
-  delete peerConnections[id];
-  document.querySelector(`video[data-peer="${id}"]`)?.remove();
-  document.getElementById(`viewer-controls-${id}`)?.remove();
+socket.on('signal', ({ viewerId, signal }) => {
+  if (peers[viewerId]) peers[viewerId].signal(signal);
 });
 
-// 🎤 Grant mic to viewer
-socket.on('grant-mic', () => {
-  if (viewerStream) {
-    viewerStream.getAudioTracks().forEach(track => (track.enabled = true));
-    appendMessage("🎤 Mic granted by broadcaster");
+socket.on('disconnectPeer', viewerId => {
+  if (peers[viewerId]) {
+    peers[viewerId].destroy();
+    delete peers[viewerId];
+    document.getElementById(viewerId)?.remove();
   }
 });
 
-// ❌ Kick viewer
-socket.on('kick-viewer', () => {
-  alert("You have been removed by the broadcaster.");
-  window.location.reload();
+socket.on('viewer-count', count => {
+  viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
 });
+
+socket.on('emoji', ({ sender, emoji }) => appendMessage(`🎉 ${sender}: ${emoji}`));
+socket.on('raise-hand', ({ sender }) => appendMessage(`✋ ${sender} raised hand`));
+socket.on('chat', ({ sender, msg }) => appendMessage(`💬 ${sender}: ${msg}`));
+
+function toggleMic() {
+  if (!localStream) return;
+  const audioTrack = localStream.getAudioTracks()[0];
+  if (!audioTrack) return;
+  isMicMuted = !isMicMuted;
+  audioTrack.enabled = !isMicMuted;
+  appendMessage(isMicMuted ? '🔇 Mic muted' : '🎤 Mic unmuted');
+}
+
+function sendMessage() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  socket.emit('chat', { roomId: currentRoomId, msg, sender: getBroadcasterName() });
+  appendMessage(`🟢 ${getBroadcasterName()}: ${msg}`);
+  chatInput.value = '';
+}
+
+function sendEmoji(emoji) {
+  socket.emit('emoji', { roomId: currentRoomId, emoji, sender: getBroadcasterName() });
+  appendMessage(`🟢 ${getBroadcasterName()}: ${emoji}`);
+}
+
+function grantMic(viewerId) {
+  socket.emit('grant-mic', viewerId);
+  highlightSpeaker(viewerId);
+}
+
+function kickViewer(viewerId) {
+  socket.emit('kick-viewer', viewerId);
+}
+
+function highlightSpeaker(viewerId) {
+  if (activeSpeaker && document.getElementById(`mic-${activeSpeaker}`)) {
+    document.getElementById(`mic-${activeSpeaker}`).innerText = '';
+  }
+  activeSpeaker = viewerId;
+  const micSpan = document.getElementById(`mic-${viewerId}`);
+  if (micSpan) micSpan.innerText = '🔊';
+}
