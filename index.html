@@ -55,7 +55,8 @@
 
   <!-- Scripts: Socket.IO → SimplePeer → your app -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/lib/simplepeer.min.js"></script>
+  <!-- NOTE: server maps /lib -> node_modules, so SimplePeer is under /lib/simple-peer/ -->
+  <script src="/lib/simple-peer/simplepeer.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
