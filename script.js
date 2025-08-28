@@ -1,4 +1,4 @@
-// ====== Broadcaster-side script.js (UPDATED WORLD-READY) ======
+// ====== Broadcaster-side script.js (FIXED) ======
 const socket = io();
 let peers = {};                  // viewerId -> SimplePeer
 let localStream = null;
@@ -8,15 +8,12 @@ let isMicMuted = false;
 let activeSpeaker = null;
 
 /**
- * 🌍 ICE servers for global reliability (incl. China/UAE/corporate firewalls)
- * Replace turn.your-domain.com / USER / PASS with your actual TURN service.
- * Keep the turns:443 entries — they punch through most firewalls.
+ * 🌍 ICE servers for global reliability (replace with your TURN creds in production)
+ * For quick tests you can keep only the Google STUN line below.
  */
 const ICE_SERVERS = [
-  // Your own STUN (same host as TURN is fine)
+  // Your STUN/TURN (replace placeholders when ready)
   { urls: ['stun:turn.your-domain.com:3478', 'stun:turn.your-domain.com:5349'] },
-
-  // TURN over TLS on 443 (best chance through strict firewalls)
   {
     urls: [
       'turns:turn.your-domain.com:443?transport=tcp',
@@ -25,8 +22,6 @@ const ICE_SERVERS = [
     username: 'YOUR_TURN_USER',
     credential: 'YOUR_TURN_PASS'
   },
-
-  // Optional: classic TURN on 3478 for networks that allow UDP
   {
     urls: [
       'turn:turn.your-domain.com:3478?transport=udp',
@@ -35,8 +30,7 @@ const ICE_SERVERS = [
     username: 'YOUR_TURN_USER',
     credential: 'YOUR_TURN_PASS'
   },
-
-  // (Optional fallback) Google STUN — often blocked in some countries
+  // (Optional fallback) Often blocked in some regions but fine for testing
   { urls: 'stun:stun.l.google.com:19302' }
 ];
 
@@ -58,6 +52,7 @@ if (!viewerTiles) {
   viewerTiles.style.display = 'grid';
   viewerTiles.style.gridTemplateColumns = 'repeat(auto-fit, minmax(220px, 1fr))';
   viewerTiles.style.gap = '12px';
+  viewerTiles.style.marginBlock = '12px';
   document.body.appendChild(viewerTiles);
 }
 
@@ -69,6 +64,7 @@ function getBroadcasterName() {
   return document.getElementById('broadcasterName')?.value.trim() || 'Amiim';
 }
 function appendMessage(msg) {
+  if (!chatBox) return;
   chatBox.value += msg + '\n';
   chatBox.scrollTop = chatBox.scrollHeight;
 }
@@ -104,7 +100,7 @@ function makeViewerTile(viewerId, remoteStream) {
   card.appendChild(label);
   viewerTiles.appendChild(card);
 
-  vid.play().catch(() => {});
+  vid.play?.().catch(() => {});
 }
 function removeViewerTile(viewerId) {
   const el = document.getElementById(`viewer-card-${viewerId}`);
@@ -220,7 +216,7 @@ socket.on('watcher', ({ viewerId, viewerName }) => {
   if (peers[viewerId]) {
     try { peers[viewerId].destroy(); } catch {}
     delete peers[viewerId];
-    document.getElementById(viewerId)?..remove();
+    document.getElementById(viewerId)?.remove();   // ✅ fixed typo here
     removeViewerTile(viewerId);
   }
   if (!localStream) return; // not broadcasting yet
@@ -285,7 +281,7 @@ socket.on('disconnectPeer', viewerId => {
 
 // ---------- Live counters / chat / emoji / raise-hand ----------
 socket.on('viewer-count', count => {
-  viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
+  if (viewerCountDisplay) viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
 });
 socket.on('emoji', ({ sender, emoji }) => appendMessage(`🎉 ${sender}: ${emoji}`));
 socket.on('raise-hand', ({ sender }) => appendMessage(`✋ ${sender} raised hand`));
@@ -307,6 +303,7 @@ function sendMessage() {
   if (!msg) return;
   socket.emit('chat', { roomId: currentRoomId, msg, sender: getBroadcasterName() });
   appendMessage(`🟢 ${getBroadcasterName()}: ${msg}`); // server doesn't echo to sender
+  chatInput.value = '';
 }
 function sendEmoji(emoji) {
   socket.emit('emoji', { roomId: currentRoomId, emoji, sender: getBroadcasterName() });
@@ -335,7 +332,7 @@ window.startBroadcast = startBroadcast;
 window.shareScreen = shareScreen;
 window.shareEvent = shareEvent;
 window.backToSlides = backToSlides;
-window.switchCamera = switchCamera;   // <- optional button if you add it in HTML
+window.switchCamera = switchCamera;   // optional button if you add it in HTML
 window.toggleMic = toggleMic;
 window.sendMessage = sendMessage;
 window.sendEmoji = sendEmoji;

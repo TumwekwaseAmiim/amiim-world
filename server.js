@@ -5,12 +5,12 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server); // same-origin, no special CORS needed
 
 // Serve static files (project root)
 app.use(express.static(path.join(__dirname)));
 
-// ✅ Serve node_modules at /lib (so SimplePeer is /lib/simple-peer/simplepeer.min.js)
+// ✅ Serve node_modules at /lib (SimplePeer is /lib/simple-peer/simplepeer.min.js)
 app.use('/lib', express.static(path.join(__dirname, 'node_modules')));
 
 // Routes
@@ -36,6 +36,12 @@ io.on('connection', (socket) => {
     socket.roomId = roomId;
     socket.broadcasterName = broadcasterName || 'Broadcaster';
     console.log(`🎥 Broadcaster "${socket.broadcasterName}" joined room: ${roomId}`);
+
+    // Sync initial counts/lists
+    io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
+    const viewerList = Array.from(rooms[roomId].viewers.entries()).map(([id, name]) => ({ id, name }));
+    io.to(roomId).emit('viewer-list', viewerList);
+    io.to(roomId).emit('stream-mode', rooms[roomId].mode || 'slides');
   });
 
   // Viewer joins a room
@@ -69,8 +75,7 @@ io.on('connection', (socket) => {
    * Supports BOTH:
    *  - { roomId, viewerId, signal }  (broadcaster -> viewer)
    *  - { roomId, signal }            (viewer -> broadcaster)
-   *  - { targetId, signal }          (legacy direct)
-   * Forwards payloads as { viewerId, signal }.
+   *  - { targetId, signal }          (legacy direct; restricted to broadcaster)
    */
   socket.on('signal', (payload = {}) => {
     try {
@@ -91,8 +96,8 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Legacy direct
-      if (payload.targetId && payload.signal) {
+      // Legacy direct (only allow broadcaster to use it)
+      if (room && room.broadcaster === socket.id && payload.targetId && payload.signal) {
         io.to(payload.targetId).emit('signal', { viewerId: socket.id, signal: payload.signal });
         return;
       }
@@ -117,27 +122,29 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('raise-hand', { sender }); // everyone except sender
   });
 
-  // Grant mic permission (viewer should handle this to unmute/send)
+  // Grant mic permission — restrict to broadcaster
   socket.on('grant-mic', (viewerId) => {
+    const roomId = socket.roomId;
+    const room = rooms[roomId];
+    if (!room || room.broadcaster !== socket.id) return; // guard
     if (viewerId) io.to(viewerId).emit('grant-mic');
   });
 
-  // Kick viewer
+  // Kick viewer — restrict to broadcaster
   socket.on('kick-viewer', (viewerId) => {
     const roomId = socket.roomId;
-    if (!viewerId || !roomId || !rooms[roomId]) return;
+    const room = rooms[roomId];
+    if (!viewerId || !room || room.broadcaster !== socket.id) return; // guard
 
     io.to(viewerId).emit('kick-viewer');
-    rooms[roomId].viewers.delete(viewerId);
+    room.viewers.delete(viewerId);
 
-    io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
-    const viewerList = Array.from(rooms[roomId].viewers.entries()).map(([id, name]) => ({ id, name }));
+    io.to(roomId).emit('viewer-count', room.viewers.size);
+    const viewerList = Array.from(room.viewers.entries()).map(([id, name]) => ({ id, name }));
     io.to(roomId).emit('viewer-list', viewerList);
 
     // also notify broadcaster to tear down the peer
-    if (rooms[roomId].broadcaster) {
-      io.to(rooms[roomId].broadcaster).emit('disconnectPeer', viewerId);
-    }
+    io.to(room.broadcaster).emit('disconnectPeer', viewerId);
   });
 
   // Stream mode broadcast
