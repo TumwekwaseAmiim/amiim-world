@@ -5,55 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>🎥 Broadcaster - Amiim Live Events</title>
   <link rel="stylesheet" href="style.css" />
+  <meta name="color-scheme" content="light dark" />
 </head>
 <body>
-  <h1>🎥 Broadcaster - Amiim Live Events</h1>
+  <header>
+    <h1>🎥 Broadcaster — Amiim Live Events</h1>
+    <div id="welcomeBanner" role="status" aria-live="polite">
+      👋 Welcome to <strong>Eng. Amiim Live Broadcast</strong>. Start your session and interact with viewers in real time!
+    </div>
+  </header>
 
-  <!-- ✅ Welcome Banner -->
-  <div id="welcomeBanner">
-    👋 Welcome to <strong>Eng. Amiim Live Broadcast</strong> platform. Start your session and interact with viewers in real-time!
-  </div>
+  <section class="controls" aria-label="Broadcast controls">
+    <input type="text" id="broadcasterName" placeholder="👤 Your Name" required />
+    <input type="text" id="roomId" placeholder="🔐 Room ID" required />
+    <button id="btnStart" onclick="startBroadcast()" aria-label="Start Broadcast">🎥 Start Broadcast</button>
+    <button id="btnShareScreen" onclick="shareScreen()" aria-label="Share Screen or Slides">🖥️ Share Slides/Screen</button>
+    <button id="btnShareEvent" onclick="shareEvent()" aria-label="Show Event or Town View">📍 Show Event/Town</button>
+    <button id="backBtn" onclick="backToSlides()" style="display:none;" aria-label="Back to Slides">↩️ Back to Slides</button>
+  </section>
 
-  <!-- 🎛️ Broadcast Controls -->
-  <div class="controls">
-    <input type="text" id="broadcasterName" placeholder="👤 Your Name" />
-    <input type="text" id="roomId" placeholder="🔐 Room ID" />
-    <button onclick="startBroadcast()">🎥 Start Broadcast</button>
-    <button onclick="shareScreen()">🖥️ Share Slides/Screen</button>
-    <button onclick="shareEvent()">📍 Show Event/Town</button>
-    <button onclick="backToSlides()" id="backBtn" style="display: none;">↩️ Back to Slides</button>
-  </div>
-
-  <!-- 📺 Stream Mode & Viewer Count -->
-  <div class="status-bar">
+  <section class="status-bar" aria-label="Stream status">
     <h3 id="streamMode">📺 Mode: Slides</h3>
     <div id="viewerCount">👥 Viewers: 0</div>
-  </div>
+  </section>
 
-  <!-- 📹 Video Preview -->
-  <video id="mainVideo" autoplay playsinline muted class="video-main"></video>
-  <video id="selfPreview" autoplay playsinline muted class="video-self"></video>
+  <section class="video-area" aria-label="Video previews">
+    <video id="mainVideo" class="video-main" autoplay playsinline muted></video>
+    <video id="selfPreview" class="video-self" autoplay playsinline muted></video>
+  </section>
 
-  <!-- 🛠️ Viewer Management -->
-  <div id="viewerControls">
+  <section id="viewerControls" aria-label="Viewer management">
     <h3>🎙️ Manage Viewers</h3>
     <ul id="viewerList"></ul>
-  </div>
+  </section>
 
-  <!-- 💬 Chat Section -->
-  <div class="chat-container">
+  <section id="viewerTiles" aria-label="Viewer audio/video wall"
+           style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-block:12px;">
+  </section>
+
+  <section class="chat-container" aria-label="Chat with viewers">
     <textarea id="chat-box" class="chat-box" readonly placeholder="💬 Chat with viewers..."></textarea><br/>
     <input type="text" id="chat-input" placeholder="✏️ Type message..." />
     <button onclick="sendMessage()">Send</button>
-    <button onclick="toggleMic()">🎙️ Toggle Mic</button>
-    <button onclick="sendEmoji('👍')">👍</button>
-    <button onclick="sendEmoji('❤️')">❤️</button>
-    <button onclick="sendEmoji('👏')">👏</button>
-  </div>
+    <button onclick="toggleMic()" aria-pressed="false" id="toggleMicBtn">🎙️ Toggle Mic</button>
+    <button onclick="sendEmoji('👍')" aria-label="Send thumbs up">👍</button>
+    <button onclick="sendEmoji('❤️')" aria-label="Send heart">❤️</button>
+    <button onclick="sendEmoji('👏')" aria-label="Send clap">👏</button>
+  </section>
 
-  <!-- 📜 Scripts -->
+  <!-- Scripts: Socket.IO → SimplePeer → your app -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/simplepeer.min.js"></script>
+  <script src="/lib/simplepeer.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

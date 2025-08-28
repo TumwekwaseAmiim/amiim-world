@@ -5,75 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>🎦 Viewer - Amiim Live Events</title>
   <link rel="stylesheet" href="style.css" />
+  <meta name="color-scheme" content="light dark" />
   <style>
-    .animated-banner {
-      animation: pulse 2s infinite;
-      background: linear-gradient(to right, #fff200, #f9a602);
-      color: #000;
-      font-weight: bold;
-      text-align: center;
-      padding: 15px;
-      border-bottom: 4px solid #000;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    /* Simple notice banner */
+    #noticeBar {
+      background: #111;
+      color: #00ffcc;
+      border: 2px solid #00ffcc;
+      border-radius: 10px;
+      padding: 12px;
+      width: 90%;
+      max-width: 900px;
+      margin: 12px auto;
+      box-shadow: 0 0 10px #00ffcc40;
+      line-height: 1.5;
     }
-
-    @keyframes pulse {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.03); }
-      100% { transform: scale(1); }
-    }
-
-    .animated-banner strong {
-      color: #b30000;
-    }
+    .video-area { display:grid; gap:12px; margin:12px 0; }
+    .video-area video { width:100%; max-height:60vh; background:#000; border-radius:10px; }
+    .controls input { margin-right:6px; }
   </style>
 </head>
-<body>
-  <!-- 🟡 Notification Banner -->
-  <div class="animated-banner">
-    💡 <strong>Thanks for loving Eng. Amiim!</strong><br/>
-    📢 No live video today – just test the chat and features.<br/>
-    🎥 <strong>Live test: August 5, 2025, from 2:00 PM to 2:10 PM</strong><br/>
-    📸 Send your screenshots to WhatsApp: <strong>0786598658</strong>
+<body class="viewer-page">
+  <!-- ✅ Notice Banner -->
+  <div id="noticeBar" role="status" aria-live="polite">
+    🎉 <strong>Welcome to Eng. Amiim!</strong><br/>
+    🗓️ <strong>Saturday, 30 August 2025 — 2:00 PM</strong><br/>
+    We will test <strong>video</strong>, <strong>audio</strong>, and <strong>real-time text chat</strong>.
   </div>
 
-  <h1>🎦 Viewer - Join Live Broadcast</h1>
+  <h1>🎦 Viewer — Join Live Broadcast</h1>
 
   <!-- 🔐 Room Entry Controls -->
-  <div class="controls">
-    <input type="text" id="roomId" placeholder="🔐 Enter Room ID" />
-    <input type="text" id="viewerName" placeholder="👤 Your Name" />
+  <section class="controls" aria-label="Join controls">
+    <input type="text" id="roomId" placeholder="🔐 Enter Room ID" required />
+    <input type="text" id="viewerName" placeholder="👤 Your Name" required />
     <button onclick="joinBroadcast()">📡 Join Broadcast</button>
-  </div>
+  </section>
 
   <!-- 📝 Status -->
-  <h3 id="welcomeMessage">👋 Welcome to Eng. Amiim Live Broadcast Site, enjoy!</h3>
-  <h3 id="streamMode">📻 Mode: Slides</h3>
-  <div id="viewerCount">👥 Viewers: 0</div>
+  <section aria-label="Status">
+    <h3 id="welcomeMessage">👋 Welcome to Eng. Amiim Live Broadcast Site, enjoy!</h3>
+    <h3 id="streamMode">📺 Mode: Slides</h3>
+    <div id="viewerCount">👥 Viewers: 0</div>
+  </section>
 
   <!-- 🎥 Video Display -->
-  <video id="selfVideo" autoplay playsinline muted></video>
-  <video id="mainVideo" autoplay playsinline></video>
+  <section class="video-area" aria-label="Video">
+    <!-- Your local preview: keep MUTED to satisfy autoplay -->
+    <video id="selfVideo" autoplay playsinline muted></video>
+    <!-- Broadcaster stream: UNMUTED so you can hear them -->
+    <video id="mainVideo" autoplay playsinline></video>
+  </section>
 
   <!-- 💬 Chat Interface -->
-  <div class="chat-container">
+  <section class="chat-container" aria-label="Chat">
     <textarea id="chat-box" class="chat-box" readonly placeholder="💬 Chat with host..."></textarea><br />
     <input type="text" id="chat-input" placeholder="✏️ Type message..." />
     <button onclick="sendMessage()">Send</button>
-  </div>
+  </section>
 
   <!-- 🎭 Reactions and Mic -->
-  <div class="viewer-actions">
-    <button onclick="sendEmoji('👍')">👍</button>
-    <button onclick="sendEmoji('❤️')">❤️</button>
-    <button onclick="sendEmoji('👏')">👏</button>
+  <section class="viewer-actions" aria-label="Actions">
+    <button onclick="sendEmoji('👍')" aria-label="Send thumbs-up">👍</button>
+    <button onclick="sendEmoji('❤️')" aria-label="Send heart">❤️</button>
+    <button onclick="sendEmoji('👏')" aria-label="Send clap">👏</button>
     <button onclick="raiseHand()">✋ Raise Hand</button>
-    <button onclick="toggleMic()" id="micToggleBtn">🎧 Mute</button>
-  </div>
+    <button onclick="toggleMic()" id="micToggleBtn" aria-pressed="false">🎧 Mute</button>
+  </section>
 
-  <!-- 📜 Scripts -->
+  <!-- 📜 Scripts: Socket.IO → SimplePeer → your app -->
   <script src="/socket.io/socket.io.js"></script>
-  <script src="simplepeer.min.js"></script>
+  <script src="/lib/simplepeer.min.js"></script>
   <script src="viewer.js"></script>
 </body>
 </html>

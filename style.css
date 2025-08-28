@@ -109,7 +109,7 @@ h1 {
   z-index: 1000;
 }
 
-/* 🧝 Viewer Video Grid (Optional if used) */
+/* 🧝 Viewer Video Grid (old, optional) */
 #viewerStreams {
   display: flex;
   flex-wrap: wrap;
@@ -264,6 +264,46 @@ button[onclick="toggleMic()"]:hover {
   background: #218838;
 }
 
+/* 🎧 Viewer Tiles Grid for broadcaster page */
+#viewerTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 20px auto;
+  width: 90%;
+  max-width: 1000px;
+}
+
+#viewerTiles video {
+  width: 100%;
+  height: auto;
+  background: #000;
+  border: 2px solid #555;
+  border-radius: 8px;
+}
+
+/* 👤 Viewer page self-preview */
+#selfVideo {
+  width: 200px;
+  height: 150px;
+  border: 2px solid #00ffcc;
+  border-radius: 6px;
+  background-color: #111;
+  margin: 10px auto;
+  display: block;
+}
+
+/* 📺 Viewer page broadcaster stream */
+body.viewer-page #mainVideo {
+  width: 90%;
+  max-width: 900px;
+  margin: 20px auto;
+  display: block;
+  border: 3px solid #00ffcc;
+  border-radius: 10px;
+  background-color: #111;
+}
+
 /* 📱 Responsive Design */
 @media screen and (max-width: 600px) {
   .controls input,
@@ -295,5 +335,10 @@ button[onclick="toggleMic()"]:hover {
 
   h1 {
     font-size: 1.5em;
+  }
+
+  #selfVideo {
+    width: 120px;
+    height: 90px;
   }
 }
