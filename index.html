@@ -34,6 +34,60 @@
     <video id="selfPreview" class="video-self" autoplay playsinline muted></video>
   </section>
 
+  <!-- ✅ NEW: Recording Section -->
+  <section id="recordingSection" class="recording" aria-label="Recording controls" style="margin-block:16px">
+    <h3>⏺️ Recording</h3>
+
+    <div class="record-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+      <label for="recordSource" style="min-width:140px">Source</label>
+      <select id="recordSource">
+        <option value="main">Main Stream (what viewers see)</option>
+        <option value="camera">Camera/Event (local)</option>
+        <option value="screen">Slides/Screen (local)</option>
+      </select>
+
+      <label for="recordBitrate" style="min-width:140px">Quality (Video kbps)</label>
+      <select id="recordBitrate">
+        <option value="800000">800 (Low)</option>
+        <option value="1200000" selected>1200 (Standard)</option>
+        <option value="2500000">2500 (High)</option>
+        <option value="4000000">4000 (Very High)</option>
+      </select>
+
+      <label for="recordAudioMix" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="recordAudioMix" checked />
+        Mix mic if source has no audio
+      </label>
+
+      <label for="recordAutoSave" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="recordAutoSave" checked />
+        Auto-download when stopped
+      </label>
+    </div>
+
+    <div class="record-row" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px">
+      <button id="btnRecStart" aria-label="Start recording">⏺️ Start</button>
+      <button id="btnRecPause" aria-label="Pause recording" disabled>⏸️ Pause</button>
+      <button id="btnRecResume" aria-label="Resume recording" disabled>▶️ Resume</button>
+      <button id="btnRecStop" aria-label="Stop recording" disabled>⏹️ Stop</button>
+
+      <span id="recStatus" aria-live="polite" style="margin-left:8px">Status: idle</span>
+      <span id="recTimer" style="margin-left:8px">00:00</span>
+      <span id="recSize" style="margin-left:8px">0.0 MB</span>
+      <a id="recDownload" href="#" download="amiim-recording.webm" style="display:none;margin-left:8px">⬇️ Download</a>
+    </div>
+
+    <!-- Tiny VU for record source audio -->
+    <div id="recVu" style="height:6px;background:var(--vu-bg,#e5e7eb);margin-top:8px;border-radius:4px;overflow:hidden">
+      <div id="recVuBar" style="height:100%;width:0%;background:var(--vu-bar,#3b82f6);transition:width .1s"></div>
+    </div>
+
+    <p style="margin-top:8px;font-size:.9rem;opacity:.8">
+      Tip: Browser recordings save as <code>.webm</code>. You can convert to <code>.mp4</code> later with FFmpeg if needed.
+    </p>
+  </section>
+  <!-- /Recording Section -->
+
   <section id="viewerControls" aria-label="Viewer management">
     <h3>🎙️ Manage Viewers</h3>
     <ul id="viewerList"></ul>

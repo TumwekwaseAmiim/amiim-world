@@ -23,6 +23,22 @@
     .video-area { display:grid; gap:12px; margin:12px 0; }
     .video-area video { width:100%; max-height:60vh; background:#000; border-radius:10px; }
     .controls input { margin-right:6px; }
+    .overlay-btn {
+      position:absolute; inset:auto 12px 12px auto;
+      padding:8px 12px; border-radius:10px; border:1px solid #fff3;
+      background:#000a; color:#fff; cursor:pointer;
+    }
+    .stack { position:relative; }
+    #banner, #micGranted {
+      display:none; margin:10px auto; padding:8px 12px; border-radius:10px;
+      border:1px solid #facc15; background:#fffae6; color:#7a5d00; max-width:900px;
+    }
+    #diagBar {
+      font-size: .9rem; opacity:.85; margin:8px auto; max-width:900px;
+    }
+    /* tiny VU */
+    #selfVu { height:6px; background:#e5e7eb; border-radius:4px; overflow:hidden; }
+    #selfVuBar { height:100%; width:0%; background:#3b82f6; transition:width .1s; }
   </style>
 </head>
 <body class="viewer-page">
@@ -40,6 +56,7 @@
     <input type="text" id="roomId" placeholder="🔐 Enter Room ID" required />
     <input type="text" id="viewerName" placeholder="👤 Your Name" required />
     <button onclick="joinBroadcast()">📡 Join Broadcast</button>
+    <button id="btnSendFeedback" style="margin-left:8px" onclick="sendFeedback()">📝 Send Feedback</button>
   </section>
 
   <!-- 📝 Status -->
@@ -49,12 +66,24 @@
     <div id="viewerCount">👥 Viewers: 0</div>
   </section>
 
+  <div id="banner" role="status" aria-live="polite"></div>
+  <div id="micGranted" role="status" aria-live="polite">✅ Mic permission granted. You can speak now.</div>
+
   <!-- 🎥 Video Display -->
   <section class="video-area" aria-label="Video">
     <!-- Your local preview: keep MUTED to satisfy autoplay -->
-    <video id="selfVideo" autoplay playsinline muted></video>
-    <!-- Broadcaster stream: UNMUTED so you can hear them -->
-    <video id="mainVideo" autoplay playsinline></video>
+    <div>
+      <label for="selfVideo"><strong>Your Mic/Camera (muted locally)</strong></label>
+      <video id="selfVideo" autoplay playsinline muted></video>
+      <div id="selfVu" aria-hidden="true"><div id="selfVuBar"></div></div>
+    </div>
+
+    <!-- Broadcaster stream: we show an unmute overlay to comply with autoplay policies -->
+    <div class="stack">
+      <label for="mainVideo"><strong>Live from Broadcaster</strong></label>
+      <video id="mainVideo" autoplay playsinline></video>
+      <button id="unmuteBtn" class="overlay-btn" onclick="unmuteMain()">🔊 Tap to unmute</button>
+    </div>
   </section>
 
   <!-- 💬 Chat Interface -->
@@ -71,6 +100,13 @@
     <button onclick="sendEmoji('👏')" aria-label="Send clap">👏</button>
     <button onclick="raiseHand()">✋ Raise Hand</button>
     <button onclick="toggleMic()" id="micToggleBtn" aria-pressed="false">🎧 Mute</button>
+  </section>
+
+  <!-- 🔧 Diagnostics -->
+  <section id="diagBar" aria-label="Diagnostics">
+    <span id="iceState">ICE: -</span> •
+    <span id="connState">Peer: -</span> •
+    <span id="resumeHint" style="display:none;">If video is paused, tap the screen or Unmute.</span>
   </section>
 
   <!-- 📜 Scripts: Socket.IO → SimplePeer → your app -->

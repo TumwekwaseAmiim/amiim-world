@@ -1,4 +1,4 @@
-// 📹 viewer.js (UPDATED WORLD-READY)
+// 📹 viewer.js (WORLD-READY + AUTOPLAY + DIAGNOSTICS + FEEDBACK)
 const socket = io();
 
 let peer = null;
@@ -7,13 +7,26 @@ let roomId = '';
 let viewerName = '';
 let isMicMuted = false;
 
-// 🌍 ICE servers for global reliability (incl. China/UAE/corporate firewalls)
-// Replace turn.your-domain.com / YOUR_TURN_USER / YOUR_TURN_PASS with your real TURN service.
-const ICE_SERVERS = [
-  // Your own STUN (same host as TURN is fine)
-  { urls: ['stun:turn.your-domain.com:3478', 'stun:turn.your-domain.com:5349'] },
+// ===== Console ring buffer (for feedback) =====
+const CONSOLE_BUF = [];
+const MAX_LOGS = 200;
+['log', 'warn', 'error'].forEach((level) => {
+  const orig = console[level];
+  console[level] = (...args) => {
+    try {
+      const line = `[${new Date().toISOString()}] ${level.toUpperCase()} ${args.map(a => {
+        try { return typeof a === 'string' ? a : JSON.stringify(a); } catch { return String(a); }
+      }).join(' ')}`;
+      CONSOLE_BUF.push(line);
+      if (CONSOLE_BUF.length > MAX_LOGS) CONSOLE_BUF.shift();
+    } catch {}
+    orig.apply(console, args);
+  };
+});
 
-  // TURN over TLS on 443 (best chance through strict firewalls)
+// 🌍 ICE servers (replace TURN creds in production)
+const ICE_SERVERS = [
+  { urls: ['stun:turn.your-domain.com:3478', 'stun:turn.your-domain.com:5349'] },
   {
     urls: [
       'turns:turn.your-domain.com:443?transport=tcp',
@@ -22,8 +35,6 @@ const ICE_SERVERS = [
     username: 'YOUR_TURN_USER',
     credential: 'YOUR_TURN_PASS'
   },
-
-  // Optional: classic TURN on 3478 for networks that allow UDP
   {
     urls: [
       'turn:turn.your-domain.com:3478?transport=udp',
@@ -32,101 +43,168 @@ const ICE_SERVERS = [
     username: 'YOUR_TURN_USER',
     credential: 'YOUR_TURN_PASS'
   },
-
-  // (Optional fallback) Google STUN — often blocked in some countries
   { urls: 'stun:stun.l.google.com:19302' }
 ];
 
-// DOM Elements
-const mainVideo = document.getElementById('mainVideo');  // broadcaster stream (UNMUTED)
-const selfVideo = document.getElementById('selfVideo');  // local preview (MUTED)
+// ===== DOM =====
+const mainVideo = document.getElementById('mainVideo');   // broadcaster stream (will start muted)
+const selfVideo = document.getElementById('selfVideo');   // local preview (muted)
 const chatBox = document.getElementById('chat-box');
 const chatInput = document.getElementById('chat-input');
 const viewerCountDisplay = document.getElementById('viewerCount');
 const streamModeLabel = document.getElementById('streamMode');
 const micToggleBtn = document.getElementById('micToggleBtn');
+const unmuteBtn = document.getElementById('unmuteBtn');
+const banner = document.getElementById('banner');
+const micGranted = document.getElementById('micGranted');
+const selfVuBar = document.getElementById('selfVuBar');
+const iceStateEl = document.getElementById('iceState');
+const connStateEl = document.getElementById('connState');
 
-// Helpers
+// ===== Helpers =====
 function appendMessage(msg) {
   chatBox.value += msg + '\n';
   chatBox.scrollTop = chatBox.scrollHeight;
 }
+function showBanner(text, ttlMs = 4000) {
+  if (!banner) return;
+  banner.textContent = text;
+  banner.style.display = 'block';
+  clearTimeout(banner._t);
+  banner._t = setTimeout(() => (banner.style.display = 'none'), ttlMs);
+}
+function setDiag(ice, conn) {
+  if (iceStateEl) iceStateEl.textContent = `ICE: ${ice ?? '-'}`;
+  if (connStateEl) connStateEl.textContent = `Peer: ${conn ?? '-'}`;
+}
 
+// ===== Autoplay-safe audio: start muted, let user unmute =====
+function ensureMainPlayback() {
+  if (!mainVideo) return;
+  mainVideo.muted = true; // start muted to satisfy autoplay
+  mainVideo.play?.().catch(() => {}); // try autoplay
+  if (unmuteBtn) unmuteBtn.style.display = 'inline-block';
+}
+function unmuteMain() {
+  if (!mainVideo) return;
+  mainVideo.muted = false;
+  mainVideo.play?.().catch(() => {});
+  if (unmuteBtn) unmuteBtn.style.display = 'none';
+}
+window.unmuteMain = unmuteMain;
+
+// ===== VU meter for self mic =====
+let vuCtx, vuAnalyser, vuData, vuRAF;
+function attachSelfVU(stream) {
+  try {
+    cancelAnimationFrame(vuRAF);
+  } catch {}
+  try { vuCtx?.close?.(); } catch {}
+  if (!stream.getAudioTracks().length) {
+    if (selfVuBar) selfVuBar.style.width = '0%';
+    return;
+  }
+  vuCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = vuCtx.createMediaStreamSource(stream);
+  vuAnalyser = vuCtx.createAnalyser();
+  vuAnalyser.fftSize = 256;
+  src.connect(vuAnalyser);
+  vuData = new Uint8Array(vuAnalyser.frequencyBinCount);
+
+  function tick() {
+    vuAnalyser.getByteTimeDomainData(vuData);
+    let peak = 0;
+    for (let i = 0; i < vuData.length; i++) peak = Math.max(peak, Math.abs(vuData[i] - 128));
+    const pct = Math.min(100, Math.floor((peak / 64) * 100));
+    if (selfVuBar) selfVuBar.style.width = pct + '%';
+    vuRAF = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+// ===== Peer lifecycle =====
 function ensurePeer() {
   if (peer) return peer;
 
-  // Build the SimplePeer once, when we first receive a signal from the broadcaster
   peer = new SimplePeer({
-    initiator: false,          // broadcaster is offering in this flow
-    trickle: true,             // allow incremental ICE
-    stream: localStream,       // send our mic/cam to broadcaster
+    initiator: false,          // broadcaster is initiator
+    trickle: true,
+    stream: localStream,
     config: { iceServers: ICE_SERVERS }
   });
 
-  // Forward our answer/ICE to the broadcaster (server infers viewerId from socket.id)
   peer.on('signal', (outSignal) => {
     if (!roomId) return;
     socket.emit('signal', { roomId, signal: outSignal });
   });
 
-  // Broadcaster stream arrives here
   peer.on('stream', (remoteStream) => {
     mainVideo.srcObject = remoteStream;
-    // Ensure audio actually starts; may need a user gesture on some browsers
-    mainVideo.play().catch(() => {});
+    ensureMainPlayback();
   });
 
   peer.on('connect', () => {
     console.log('✅ Viewer connected to broadcaster');
+    setDiag(undefined, 'connected');
   });
 
   peer.on('error', (err) => {
     console.warn('❌ Viewer peer error:', err);
+    showBanner('Network issue with the live stream. Retrying may help.');
   });
 
   peer.on('close', () => {
+    setDiag(undefined, 'closed');
     peer = null;
     mainVideo.srcObject = null;
+    showBanner('Live stream ended or connection closed.');
   });
+
+  // Diagnostics from RTCPeerConnection if available
+  setTimeout(() => {
+    const pc = peer?._pc;
+    if (!pc) return;
+    setDiag(pc.iceConnectionState, pc.connectionState);
+    pc.oniceconnectionstatechange = () => setDiag(pc.iceConnectionState, pc.connectionState);
+    pc.onconnectionstatechange = () => setDiag(pc.iceConnectionState, pc.connectionState);
+  }, 0);
 
   return peer;
 }
 
-// Join Broadcast
+// ===== Join Broadcast =====
 async function joinBroadcast() {
   roomId = document.getElementById('roomId')?.value.trim();
   viewerName = document.getElementById('viewerName')?.value.trim() || 'Anonymous';
   if (!roomId) return alert('Please enter Room ID');
 
   try {
-    // Capture local media (muted locally to satisfy autoplay)
     localStream = await navigator.mediaDevices.getUserMedia({
       video: true,
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     selfVideo.srcObject = localStream;
-    selfVideo.play().catch(() => {});
+    selfVideo.play?.().catch(() => {});
 
-    // Start with mic ON for broadcaster to hear you (you can toggle)
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) audioTrack.enabled = true;
+    // Start with mic ON (you can toggle)
+    const a = localStream.getAudioTracks()[0];
+    if (a) a.enabled = true;
     isMicMuted = false;
-    micToggleBtn.innerText = '🎧 Mute';
+    if (micToggleBtn) micToggleBtn.innerText = '🎧 Mute';
 
-    // Tell server we joined as a viewer
+    attachSelfVU(localStream);
+
+    // Tell server we joined
     socket.emit('watcher', { roomId, viewerName });
+    showBanner('Joining room…');
+
   } catch (err) {
     alert('Error accessing camera/mic: ' + err.message);
   }
 }
 
-// Incoming WebRTC signal from broadcaster → feed into our peer
+// ===== Signaling from broadcaster → feed into peer =====
 socket.on('signal', ({ viewerId, signal }) => {
-  // viewerId is informative; server already routes correctly
   const p = ensurePeer();
   try {
     p.signal(signal);
@@ -135,69 +213,60 @@ socket.on('signal', ({ viewerId, signal }) => {
   }
 });
 
-// Stream mode label updates
+// ===== Stream mode & counts =====
 socket.on('stream-mode', (mode) => {
   streamModeLabel.innerText = mode === 'event' ? '📺 Mode: Event' : '📺 Mode: Slides';
 });
-
-// Viewer count
 socket.on('viewer-count', (count) => {
   viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
 });
 
-// Chat
-socket.on('chat', ({ sender, msg }) => {
-  appendMessage(`💬 ${sender}: ${msg}`);
-});
+// ===== Chat & Emoji =====
+socket.on('chat', ({ sender, msg }) => appendMessage(`💬 ${sender}: ${msg}`));
 function sendMessage() {
   const msg = chatInput.value.trim();
   if (!msg) return;
   socket.emit('chat', { roomId, msg, sender: viewerName });
-  appendMessage(`🟢 ${viewerName}: ${msg}`); // server doesn't echo back to sender
+  appendMessage(`🟢 ${viewerName}: ${msg}`);
   chatInput.value = '';
 }
-
-// Emojis
-socket.on('emoji', ({ sender, emoji }) => {
-  appendMessage(`🎉 ${sender}: ${emoji}`);
-});
+socket.on('emoji', ({ sender, emoji }) => appendMessage(`🎉 ${sender}: ${emoji}`));
 function sendEmoji(emoji) {
   socket.emit('emoji', { roomId, emoji, sender: viewerName });
-  appendMessage(`🟢 ${viewerName}: ${emoji}`); // server doesn't echo back to sender
+  appendMessage(`🟢 ${viewerName}: ${emoji}`);
 }
 
-// Raise hand
+// ===== Raise hand =====
 function raiseHand() {
   socket.emit('raise-hand', { roomId, sender: viewerName });
   appendMessage('✋ You raised your hand');
 }
-socket.on('raise-hand', ({ sender }) => {
-  appendMessage(`✋ ${sender} raised hand`);
-});
+socket.on('raise-hand', ({ sender }) => appendMessage(`✋ ${sender} raised hand`));
 
-// Broadcaster grants mic (optional UI feedback—mic is already controllable locally)
+// ===== Mic permission from broadcaster =====
 socket.on('grant-mic', () => {
   if (localStream) {
     const t = localStream.getAudioTracks()[0];
     if (t) t.enabled = true;
   }
   isMicMuted = false;
-  micToggleBtn.innerText = '🎧 Mute';
+  if (micToggleBtn) micToggleBtn.innerText = '🎧 Mute';
+  if (micGranted) { micGranted.style.display = 'block'; setTimeout(() => micGranted.style.display = 'none', 3000); }
   appendMessage('🎤 You were granted mic permission');
 });
 
-// Toggle mic
+// ===== Toggle mic =====
 function toggleMic() {
   if (!localStream) return;
   const t = localStream.getAudioTracks()[0];
   if (!t) return;
   isMicMuted = !isMicMuted;
   t.enabled = !isMicMuted;
-  micToggleBtn.innerText = isMicMuted ? '🔇 Mic Off' : '🎧 Mute';
+  if (micToggleBtn) micToggleBtn.innerText = isMicMuted ? '🔇 Mic Off' : '🎧 Mute';
   appendMessage(isMicMuted ? '🔇 You muted your mic' : '🎤 You unmuted your mic');
 }
 
-// Kicked by broadcaster
+// ===== Kicked / disconnect handling =====
 socket.on('kick-viewer', () => {
   alert('You have been removed by the broadcaster.');
   try { if (peer) peer.destroy(); } catch {}
@@ -205,8 +274,6 @@ socket.on('kick-viewer', () => {
   mainVideo.srcObject = null;
   window.location.reload();
 });
-
-// Broadcaster disconnect cleanup
 socket.on('disconnectPeer', () => {
   try { if (peer) peer.destroy(); } catch {}
   peer = null;
@@ -214,9 +281,29 @@ socket.on('disconnectPeer', () => {
   appendMessage('❌ Broadcaster disconnected.');
 });
 
-// Expose functions for HTML buttons
+// ===== Feedback sender =====
+function sendFeedback() {
+  const text = prompt('Describe the issue or feedback:');
+  if (text == null) return;
+  const env = {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    lang: navigator.language,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+  const lastConsole = CONSOLE_BUF.slice(-100);
+  socket.emit('clientFeedback', { text, env, lastConsole });
+  showBanner('Thanks! Feedback sent.');
+}
+
+// ===== Expose for HTML =====
 window.joinBroadcast = joinBroadcast;
 window.sendMessage = sendMessage;
 window.sendEmoji = sendEmoji;
 window.raiseHand = raiseHand;
 window.toggleMic = toggleMic;
+window.sendFeedback = sendFeedback;
+window.unmuteMain = unmuteMain;
+
+// Try to keep the main player ready for autoplay policies
+ensureMainPlayback();

@@ -1,3 +1,5 @@
+// server.js — Amiim Live Events (socket.io + express)
+// ---------------------------------------------------
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -5,78 +7,132 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server); // same-origin, no special CORS needed
+const io = new Server(server); // same-origin default
 
-// Serve static files (project root)
-app.use(express.static(path.join(__dirname)));
+// --- Static assets ---
+app.use(express.static(path.join(__dirname))); // serve project root
+app.use('/lib', express.static(path.join(__dirname, 'node_modules'))); // /lib/simple-peer/...
 
-// ✅ Serve node_modules at /lib (SimplePeer is /lib/simple-peer/simplepeer.min.js)
-app.use('/lib', express.static(path.join(__dirname, 'node_modules')));
+// Basic body parser in case you later POST JSON to routes
+app.use(express.json());
 
-// Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// --- Routes ---
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/viewer', (req, res) => res.sendFile(path.join(__dirname, 'viewer.html')));
+
+// Quick health endpoint for Render/uptime checks
+app.get('/health', (_req, res) => res.status(200).send('OK'));
+
+// Status with room and viewer counts
+app.get('/status', (_req, res) => {
+  const snapshot = {};
+  for (const [roomId, room] of Object.entries(rooms)) {
+    snapshot[roomId] = {
+      broadcaster: room.broadcaster,
+      mode: room.mode,
+      viewers: Array.from(room.viewers.entries()).map(([id, name]) => ({ id, name }))
+    };
+  }
+  res.json({ rooms: snapshot, serverTime: new Date().toISOString() });
 });
-app.get('/viewer', (req, res) => {
-  res.sendFile(path.join(__dirname, 'viewer.html'));
-});
 
-// rooms[roomId] = { broadcaster: <socketId|null>, viewers: Map<socketId, name>, mode: 'slides'|'event' }
+// --- Room state ---
+// rooms[roomId] = {
+//   broadcaster: <socketId|null>,
+//   broadcasterName: <string>,
+//   viewers: Map<socketId, displayName>,
+//   mode: 'slides' | 'event',
+//   feedback: Array<{ ts, from, role, text, env?, lastConsole? }>
+// }
 const rooms = {};
 
-io.on('connection', (socket) => {
-  console.log('🔌 New connection:', socket.id);
+// --- Helper: safe emit to target socket id ---
+function safeEmit(targetId, event, payload) {
+  if (!targetId) return;
+  const target = io.sockets.sockets.get(targetId);
+  if (target) target.emit(event, payload);
+}
 
-  // Broadcaster joins a room
+// --- Helper: broadcast room viewer list & count ---
+function broadcastRoomState(roomId) {
+  const room = rooms[roomId];
+  if (!room) return;
+  const viewerList = Array.from(room.viewers.entries()).map(([id, name]) => ({ id, name }));
+  io.to(roomId).emit('viewer-count', room.viewers.size);
+  io.to(roomId).emit('viewer-list', viewerList);
+}
+
+// --- Socket.IO wiring ---
+io.on('connection', (socket) => {
+  console.log('🔌 Connected:', socket.id);
+
+  // ---- Broadcaster joins ----
   socket.on('broadcaster', ({ roomId, broadcasterName }) => {
     if (!roomId) return;
     socket.join(roomId);
-    if (!rooms[roomId]) rooms[roomId] = { broadcaster: null, viewers: new Map(), mode: 'slides' };
-    rooms[roomId].broadcaster = socket.id;
-    socket.roomId = roomId;
-    socket.broadcasterName = broadcasterName || 'Broadcaster';
-    console.log(`🎥 Broadcaster "${socket.broadcasterName}" joined room: ${roomId}`);
 
-    // Sync initial counts/lists
-    io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
-    const viewerList = Array.from(rooms[roomId].viewers.entries()).map(([id, name]) => ({ id, name }));
-    io.to(roomId).emit('viewer-list', viewerList);
+    if (!rooms[roomId]) {
+      rooms[roomId] = {
+        broadcaster: null,
+        broadcasterName: 'Broadcaster',
+        viewers: new Map(),
+        mode: 'slides',
+        feedback: []
+      };
+    }
+
+    rooms[roomId].broadcaster = socket.id;
+    rooms[roomId].broadcasterName = broadcasterName || 'Broadcaster';
+    socket.roomId = roomId;
+    socket.role = 'broadcaster';
+    socket.displayName = rooms[roomId].broadcasterName;
+
+    console.log(`🎥 Broadcaster "${socket.displayName}" joined room: ${roomId}`);
+
+    // Sync initial state
+    broadcastRoomState(roomId);
     io.to(roomId).emit('stream-mode', rooms[roomId].mode || 'slides');
   });
 
-  // Viewer joins a room
+  // ---- Viewer joins ----
   socket.on('watcher', ({ roomId, viewerName }) => {
     if (!roomId) return;
     socket.join(roomId);
-    if (!rooms[roomId]) rooms[roomId] = { broadcaster: null, viewers: new Map(), mode: 'slides' };
-    rooms[roomId].viewers.set(socket.id, viewerName || 'Anonymous');
-    socket.roomId = roomId;
-    socket.viewerName = viewerName || 'Anonymous';
 
+    if (!rooms[roomId]) {
+      rooms[roomId] = {
+        broadcaster: null,
+        broadcasterName: 'Broadcaster',
+        viewers: new Map(),
+        mode: 'slides',
+        feedback: []
+      };
+    }
+
+    const name = viewerName || 'Anonymous';
+    rooms[roomId].viewers.set(socket.id, name);
+    socket.roomId = roomId;
+    socket.role = 'viewer';
+    socket.displayName = name;
+
+    // Ask broadcaster to create a peer for this viewer
     const broadcasterId = rooms[roomId].broadcaster;
     if (broadcasterId) {
-      // notify broadcaster to create a peer for this viewer
-      io.to(broadcasterId).emit('watcher', { viewerId: socket.id, viewerName });
+      safeEmit(broadcasterId, 'watcher', { viewerId: socket.id, viewerName: name });
       // greet viewer; sync stream mode
-      socket.emit('chat', { sender: 'System', msg: `🎉 Welcome to Eng. Amiim Live Broadcast Site, enjoy!` });
+      socket.emit('chat', { sender: 'System', msg: '🎉 Welcome to Eng. Amiim Live Broadcast Site, enjoy!' });
       socket.emit('stream-mode', rooms[roomId].mode || 'slides');
     }
 
-    // update viewer count & list to everyone
-    io.to(roomId).emit('viewer-count', rooms[roomId].viewers.size);
-    const viewerList = Array.from(rooms[roomId].viewers.entries()).map(([id, name]) => ({ id, name }));
-    io.to(roomId).emit('viewer-list', viewerList);
-
-    console.log(`👀 Viewer "${socket.viewerName}" joined room: ${roomId}`);
+    broadcastRoomState(roomId);
+    console.log(`👀 Viewer "${name}" joined room: ${roomId}`);
   });
 
-  /**
-   * ✅ WebRTC signaling (two-way, compatible with your client code)
-   * Supports BOTH:
-   *  - { roomId, viewerId, signal }  (broadcaster -> viewer)
-   *  - { roomId, signal }            (viewer -> broadcaster)
-   *  - { targetId, signal }          (legacy direct; restricted to broadcaster)
-   */
+  // ---- WebRTC signaling ----
+  // Supports:
+  //  - Broadcaster -> Viewer: { roomId, viewerId, signal }
+  //  - Viewer -> Broadcaster: { roomId, signal }
+  //  - Legacy direct (broadcaster only): { targetId, signal }
   socket.on('signal', (payload = {}) => {
     try {
       const { roomId } = payload;
@@ -84,21 +140,21 @@ io.on('connection', (socket) => {
 
       // Broadcaster → Viewer
       if (room && room.broadcaster === socket.id && payload.viewerId && payload.signal) {
-        io.to(payload.viewerId).emit('signal', { viewerId: payload.viewerId, signal: payload.signal });
+        safeEmit(payload.viewerId, 'signal', { viewerId: payload.viewerId, signal: payload.signal });
         return;
       }
 
       // Viewer → Broadcaster
       if (room && room.viewers?.has(socket.id) && payload.signal) {
         if (room.broadcaster) {
-          io.to(room.broadcaster).emit('signal', { viewerId: socket.id, signal: payload.signal });
+          safeEmit(room.broadcaster, 'signal', { viewerId: socket.id, signal: payload.signal });
         }
         return;
       }
 
-      // Legacy direct (only allow broadcaster to use it)
+      // Legacy direct (broadcaster only)
       if (room && room.broadcaster === socket.id && payload.targetId && payload.signal) {
-        io.to(payload.targetId).emit('signal', { viewerId: socket.id, signal: payload.signal });
+        safeEmit(payload.targetId, 'signal', { viewerId: socket.id, signal: payload.signal });
         return;
       }
 
@@ -108,89 +164,104 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Chat / Emoji / Raise hand — do NOT echo to sender (prevents duplicates)
+  // ---- Chat / Emoji / Raise-hand (no echo to sender) ----
   socket.on('chat', ({ roomId, msg, sender }) => {
     if (!roomId) return;
-    socket.to(roomId).emit('chat', { sender, msg }); // everyone except sender
+    socket.to(roomId).emit('chat', { sender, msg });
   });
   socket.on('emoji', ({ roomId, emoji, sender }) => {
     if (!roomId) return;
-    socket.to(roomId).emit('emoji', { sender, emoji }); // everyone except sender
+    socket.to(roomId).emit('emoji', { sender, emoji });
   });
   socket.on('raise-hand', ({ roomId, sender }) => {
     if (!roomId) return;
-    socket.to(roomId).emit('raise-hand', { sender }); // everyone except sender
+    socket.to(roomId).emit('raise-hand', { sender });
   });
 
-  // Grant mic permission — restrict to broadcaster
+  // ---- Mic permission (broadcaster only) ----
   socket.on('grant-mic', (viewerId) => {
     const roomId = socket.roomId;
     const room = rooms[roomId];
     if (!room || room.broadcaster !== socket.id) return; // guard
-    if (viewerId) io.to(viewerId).emit('grant-mic');
+    if (viewerId) safeEmit(viewerId, 'grant-mic');
   });
 
-  // Kick viewer — restrict to broadcaster
+  // ---- Kick viewer (broadcaster only) ----
   socket.on('kick-viewer', (viewerId) => {
     const roomId = socket.roomId;
     const room = rooms[roomId];
     if (!viewerId || !room || room.broadcaster !== socket.id) return; // guard
 
-    io.to(viewerId).emit('kick-viewer');
+    safeEmit(viewerId, 'kick-viewer');
     room.viewers.delete(viewerId);
 
-    io.to(roomId).emit('viewer-count', room.viewers.size);
-    const viewerList = Array.from(room.viewers.entries()).map(([id, name]) => ({ id, name }));
-    io.to(roomId).emit('viewer-list', viewerList);
-
-    // also notify broadcaster to tear down the peer
-    io.to(room.broadcaster).emit('disconnectPeer', viewerId);
+    broadcastRoomState(roomId);
+    // also notify broadcaster to tear down peer
+    safeEmit(room.broadcaster, 'disconnectPeer', viewerId);
   });
 
-  // Stream mode broadcast
+  // ---- Stream mode change (anyone can reflect, but we keep it simple: broadcaster sets mode) ----
   socket.on('stream-mode', ({ roomId, mode }) => {
-    if (roomId && rooms[roomId]) {
-      rooms[roomId].mode = mode;
-      io.to(roomId).emit('stream-mode', mode);
-      console.log(`🔄 Stream mode changed in room ${roomId} → ${mode}`);
-    }
+    if (!roomId || !rooms[roomId]) return;
+    // Only allow broadcaster to change the canonical mode
+    if (rooms[roomId].broadcaster !== socket.id) return;
+    rooms[roomId].mode = mode === 'event' ? 'event' : 'slides';
+    io.to(roomId).emit('stream-mode', rooms[roomId].mode);
+    console.log(`🔄 Stream mode in ${roomId} → ${rooms[roomId].mode}`);
   });
 
-  // Handle disconnects
+  // ---- Optional: collect client feedback / logs (from your “Send Feedback” button) ----
+  // payload: { text, env, lastConsole }
+  socket.on('clientFeedback', (payload = {}) => {
+    const roomId = socket.roomId;
+    if (!roomId || !rooms[roomId]) return;
+    const entry = {
+      ts: new Date().toISOString(),
+      from: socket.displayName || socket.id,
+      role: socket.role || 'unknown',
+      text: payload.text || '',
+      env: payload.env || null,
+      lastConsole: payload.lastConsole || null
+    };
+    rooms[roomId].feedback.push(entry);
+    // keep last 100 feedback entries
+    if (rooms[roomId].feedback.length > 100) rooms[roomId].feedback.shift();
+    console.log('📝 Feedback:', roomId, entry);
+    safeEmit(rooms[roomId].broadcaster, 'feedback', entry);
+  });
+
+  // ---- Disconnect handling ----
   socket.on('disconnect', () => {
     const roomId = socket.roomId;
     if (!roomId || !rooms[roomId]) return;
 
     const room = rooms[roomId];
 
-    // Broadcaster gone → clear room and notify viewers
+    // Broadcaster left → clear room and notify viewers
     if (room.broadcaster === socket.id) {
-      console.log(`❌ Broadcaster "${socket.broadcasterName}" left room: ${roomId}`);
+      console.log(`❌ Broadcaster "${room.broadcasterName}" left room: ${roomId}`);
       for (const viewerId of room.viewers.keys()) {
-        io.to(viewerId).emit('disconnectPeer', viewerId);
+        safeEmit(viewerId, 'disconnectPeer', viewerId);
       }
       io.to(roomId).emit('viewer-count', 0);
       delete rooms[roomId];
       return;
     }
 
-    // Viewer gone
+    // Viewer left
     if (room.viewers.has(socket.id)) {
       console.log(`👤 Viewer "${room.viewers.get(socket.id)}" left room: ${roomId}`);
       room.viewers.delete(socket.id);
 
-      if (room.broadcaster) {
-        io.to(room.broadcaster).emit('disconnectPeer', socket.id);
-      }
+      // tell broadcaster to remove peer/tile
+      if (room.broadcaster) safeEmit(room.broadcaster, 'disconnectPeer', socket.id);
 
-      io.to(roomId).emit('viewer-count', room.viewers.size);
-      const viewerList = Array.from(room.viewers.entries()).map(([id, name]) => ({ id, name }));
-      io.to(roomId).emit('viewer-list', viewerList);
+      broadcastRoomState(roomId);
     }
   });
 });
 
-// Start server
+// --- Boot ---
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);

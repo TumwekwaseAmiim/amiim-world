@@ -1,4 +1,4 @@
-// ====== Broadcaster-side script.js (FIXED) ======
+// ====== Broadcaster-side script.js (FIXED + RECORDING) ======
 const socket = io();
 let peers = {};                  // viewerId -> SimplePeer
 let localStream = null;
@@ -216,7 +216,7 @@ socket.on('watcher', ({ viewerId, viewerName }) => {
   if (peers[viewerId]) {
     try { peers[viewerId].destroy(); } catch {}
     delete peers[viewerId];
-    document.getElementById(viewerId)?.remove();   // ✅ fixed typo here
+    document.getElementById(viewerId)?.remove();
     removeViewerTile(viewerId);
   }
   if (!localStream) return; // not broadcasting yet
@@ -326,6 +326,291 @@ function highlightSpeaker(viewerId) {
   const micSpan = document.getElementById(`mic-${viewerId}`);
   if (micSpan) micSpan.innerText = '🔊';
 }
+
+// ====== RECORDING MODULE ======
+let mediaRecorder = null;
+let recChunks = [];
+let recTimerId = null;
+let recStartTs = 0;
+let recBytes = 0;
+let recStream = null;
+
+// UI
+const elRecSource   = document.getElementById('recordSource');
+const elRecBitrate  = document.getElementById('recordBitrate');
+const elRecMix      = document.getElementById('recordAudioMix');
+const elRecAutoSave = document.getElementById('recordAutoSave');
+const btnRecStart   = document.getElementById('btnRecStart');
+const btnRecPause   = document.getElementById('btnRecPause');
+const btnRecResume  = document.getElementById('btnRecResume');
+const btnRecStop    = document.getElementById('btnRecStop');
+const elRecStatus   = document.getElementById('recStatus');
+const elRecTimer    = document.getElementById('recTimer');
+const elRecSize     = document.getElementById('recSize');
+const elRecDl       = document.getElementById('recDownload');
+const elRecVuBar    = document.getElementById('recVuBar');
+
+function hhmmss(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return (h ? String(h).padStart(2,'0') + ':' : '') + String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+}
+
+function setRecUI({ status, running }) {
+  if (status) elRecStatus.textContent = `Status: ${status}`;
+  btnRecStart.disabled  = running;
+  btnRecPause.disabled  = !running;
+  btnRecResume.disabled = true;
+  btnRecStop.disabled   = !running;
+}
+
+function updateSize(bytes) {
+  elRecSize.textContent = (bytes / (1024*1024)).toFixed(1) + ' MB';
+}
+
+function startTimer() {
+  recStartTs = Date.now();
+  recTimerId = setInterval(() => {
+    const elapsed = (Date.now() - recStartTs) / 1000;
+    elRecTimer.textContent = hhmmss(elapsed);
+  }, 250);
+}
+
+function stopTimer() {
+  clearInterval(recTimerId);
+  recTimerId = null;
+}
+
+let recAudioCtx, recAnalyser, recData, recRAF;
+function attachRecVU(stream) {
+  try {
+    cancelAnimationFrame(recRAF);
+    if (recAudioCtx) {
+      try { recAudioCtx.close(); } catch {}
+    }
+    if (!stream.getAudioTracks().length) {
+      elRecVuBar.style.width = '0%';
+      return;
+    }
+    recAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = recAudioCtx.createMediaStreamSource(stream);
+    recAnalyser = recAudioCtx.createAnalyser();
+    recAnalyser.fftSize = 256;
+    src.connect(recAnalyser);
+    recData = new Uint8Array(recAnalyser.frequencyBinCount);
+
+    function tick() {
+      recAnalyser.getByteTimeDomainData(recData);
+      let peak = 0;
+      for (let i = 0; i < recData.length; i++) {
+        peak = Math.max(peak, Math.abs(recData[i] - 128));
+      }
+      const pct = Math.min(100, Math.floor((peak / 64) * 100));
+      elRecVuBar.style.width = pct + '%';
+      recRAF = requestAnimationFrame(tick);
+    }
+    tick();
+  } catch (e) {
+    console.warn('rec VU init failed', e);
+  }
+}
+
+async function getCameraStreamForRec() {
+  return await navigator.mediaDevices.getUserMedia({
+    video: { width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 30} },
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  });
+}
+
+async function getScreenStreamForRec(withSystemAudio = true, mixMicIfNoAudio = true) {
+  const screen = await navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: 30 },
+    audio: withSystemAudio
+  });
+
+  const hasAudio = screen.getAudioTracks().some(t => t.readyState === 'live');
+  if (!hasAudio && mixMicIfNoAudio) {
+    // Mix mic into screen
+    const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const destination = ctx.createMediaStreamDestination();
+    ctx.createMediaStreamSource(mic).connect(destination);
+
+    const merged = new MediaStream([
+      ...screen.getVideoTracks(),
+      ...destination.stream.getAudioTracks()
+    ]);
+
+    // propagate end
+    screen.getVideoTracks().forEach(t => t.onended = () => merged.getTracks().forEach(x => x.stop()));
+    return merged;
+  }
+  return screen;
+}
+
+async function pickRecordingStream() {
+  const src = elRecSource?.value || 'main';
+  if (src === 'main') {
+    if (!localStream) throw new Error('No active main stream to record. Start broadcast first.');
+    return localStream;
+  }
+  if (src === 'camera') {
+    return await getCameraStreamForRec();
+  }
+  if (src === 'screen') {
+    const mix = !!elRecMix?.checked;
+    return await getScreenStreamForRec(true, mix);
+  }
+  // fallback
+  if (!localStream) throw new Error('No stream available for recording.');
+  return localStream;
+}
+
+function pickMimeType() {
+  // Try VP9, then VP8, then generic webm
+  const candidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return ''; // let browser decide
+}
+
+function wireTrackGuardsForRec(stream) {
+  for (const t of stream.getTracks()) {
+    t.onended    = () => elRecStatus.textContent = `Status: track ended (${t.kind})`;
+    t.oninactive = () => elRecStatus.textContent = `Status: track inactive (${t.kind})`;
+    t.onmute     = () => elRecStatus.textContent = `Status: ${t.kind} muted`;
+    t.onunmute   = () => elRecStatus.textContent = `Status: ${t.kind} unmuted`;
+  }
+}
+
+// --- Recording control handlers ---
+async function recStart() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
+
+  try {
+    recStream = await pickRecordingStream();
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+
+  attachRecVU(recStream);
+  wireTrackGuardsForRec(recStream);
+
+  const kbps = parseInt(elRecBitrate?.value || '1200000', 10);
+  const bitsPerSec = isNaN(kbps) ? 1200000 : kbps;
+
+  const mimeType = pickMimeType();
+  try {
+    mediaRecorder = new MediaRecorder(recStream, {
+      mimeType: mimeType || undefined,
+      videoBitsPerSecond: bitsPerSec
+    });
+  } catch (e) {
+    alert('MediaRecorder init failed: ' + e.message);
+    return;
+  }
+
+  recChunks = [];
+  recBytes = 0;
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size) {
+      recChunks.push(e.data);
+      recBytes += e.data.size;
+      updateSize(recBytes);
+    }
+  };
+
+  mediaRecorder.onstart = () => {
+    setRecUI({ status: 'recording', running: true });
+    startTimer();
+    elRecDl.style.display = 'none';
+  };
+  mediaRecorder.onpause = () => {
+    elRecStatus.textContent = 'Status: paused';
+  };
+  mediaRecorder.onresume = () => {
+    elRecStatus.textContent = 'Status: recording';
+  };
+  mediaRecorder.onstop = () => {
+    stopTimer();
+    setRecUI({ status: 'stopped', running: false });
+    const blob = new Blob(recChunks, { type: mimeType || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    elRecDl.href = url;
+    elRecDl.download = `amiim-recording-${Date.now()}.webm`;
+    elRecDl.style.display = 'inline-block';
+
+    if (elRecAutoSave?.checked) {
+      // auto click to download
+      elRecDl.click();
+    }
+
+    // cleanup extra tracks if source was camera/screen (not main)
+    const src = elRecSource?.value || 'main';
+    if (src !== 'main') {
+      try { recStream.getTracks().forEach(t => t.stop()); } catch {}
+    }
+    recStream = null;
+  };
+
+  try {
+    mediaRecorder.start(1000); // collect chunks every second
+  } catch (e) {
+    alert('Recorder start failed: ' + e.message);
+    return;
+  }
+
+  btnRecPause.disabled = false;
+  btnRecStop.disabled = false;
+}
+
+function recPause() {
+  if (!mediaRecorder) return;
+  if (mediaRecorder.state === 'recording') {
+    mediaRecorder.pause();
+    btnRecPause.disabled = true;
+    btnRecResume.disabled = false;
+  }
+}
+
+function recResume() {
+  if (!mediaRecorder) return;
+  if (mediaRecorder.state === 'paused') {
+    mediaRecorder.resume();
+    btnRecPause.disabled = false;
+    btnRecResume.disabled = true;
+  }
+}
+
+function recStop() {
+  if (!mediaRecorder) return;
+  if (mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  btnRecPause.disabled = true;
+  btnRecResume.disabled = true;
+  btnRecStop.disabled = true;
+  btnRecStart.disabled = false;
+
+  try { cancelAnimationFrame(recRAF); } catch {}
+  if (recAudioCtx) { try { recAudioCtx.close(); } catch {} }
+  elRecVuBar.style.width = '0%';
+}
+
+// Wire recording buttons (if present in DOM)
+if (btnRecStart)  btnRecStart.addEventListener('click', recStart);
+if (btnRecPause)  btnRecPause.addEventListener('click', recPause);
+if (btnRecResume) btnRecResume.addEventListener('click', recResume);
+if (btnRecStop)   btnRecStop.addEventListener('click', recStop);
 
 // Expose functions used by buttons in index.html
 window.startBroadcast = startBroadcast;
