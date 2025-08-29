@@ -1,5 +1,6 @@
-// ====== Broadcaster-side script.js (FIXED + RECORDING + Dynamic TURN) ======
+// ====== Broadcaster-side script.js (relay-only TURN + bitrate cap + autorecover + recording) ======
 const socket = io();
+
 let peers = {};                  // viewerId -> SimplePeer
 let localStream = null;
 let currentRoomId = '';
@@ -8,25 +9,17 @@ let isMicMuted = false;
 let activeSpeaker = null;
 
 /* -----------------------------------------------------------
-   🔐 Load ICE servers from your backend (/turn)
-   - Keep TURN username/password on the server (Render env vars)
-   - Works with Metered, Xirsys, Twilio, etc.
+   🔐 ICE servers (hard-coded Metered.ca) + force TURN relay
 ----------------------------------------------------------- */
-/* -----------------------------------------------------------
-   🔐 ICE servers (hard-coded Metered.ca)
-   – No /turn fetch needed
------------------------------------------------------------ */
-let ICE_SERVERS = [
+const ICE_SERVERS = [
   { urls: 'stun:stun.relay.metered.ca:80' },
   { urls: 'turn:global.relay.metered.ca:80',                 username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
   { urls: 'turn:global.relay.metered.ca:80?transport=tcp',   username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
   { urls: 'turn:global.relay.metered.ca:443',                username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
   { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
 ];
-
-// keep the await path happy
-const iceReady = Promise.resolve();
-
+const ICE_POLICY = 'relay'; // force TURN (reliable on mobile)
+const iceReady = Promise.resolve(); // keep await path happy
 
 // DOM references
 const mainVideo = document.getElementById('mainVideo');
@@ -101,9 +94,60 @@ function removeViewerTile(viewerId) {
   if (el) el.remove();
 }
 
-// ---------- Start broadcast ----------
+/* ---------- Bitrate limiting + auto-recover ---------- */
+function limitBitrate(peer, kbps = 600) {
+  try {
+    const pc = peer?._pc;
+    const vSender = pc?.getSenders?.().find(s => s.track && s.track.kind === 'video');
+    if (!vSender) return;
+    const params = vSender.getParameters() || {};
+    if (!params.encodings) params.encodings = [{}];
+    params.encodings[0].maxBitrate = Math.max(150_000, kbps * 1000); // bps
+    params.degradationPreference = 'maintain-framerate';
+    vSender.setParameters(params).catch(() => {});
+  } catch (e) {
+    console.warn('limitBitrate failed', e);
+  }
+}
+
+function watchConnection(peer, viewerId) {
+  const pc = peer?._pc;
+  if (!pc) return;
+
+  let hardResetTimer;
+
+  const kickRestart = () => {
+    // Try ICE restart
+    try {
+      if (pc.restartIce) pc.restartIce();
+    } catch {}
+    // Fallback: destroy after 8s (viewer will auto rejoin from their side)
+    clearTimeout(hardResetTimer);
+    hardResetTimer = setTimeout(() => {
+      try { peer.destroy(); } catch {}
+      delete peers[viewerId];
+      removeViewerTile(viewerId);
+      document.getElementById(viewerId)?.remove();
+    }, 8000);
+  };
+
+  const clearReset = () => clearTimeout(hardResetTimer);
+
+  pc.oniceconnectionstatechange = () => {
+    const st = pc.iceConnectionState;
+    if (st === 'failed' || st === 'disconnected') kickRestart();
+    if (st === 'connected' || st === 'completed') clearReset();
+  };
+  pc.onconnectionstatechange = () => {
+    const st = pc.connectionState;
+    if (st === 'failed' || st === 'disconnected') kickRestart();
+    if (st === 'connected') clearReset();
+  };
+}
+
+/* ---------- Start broadcast ---------- */
 async function startBroadcast() {
-  await iceReady; // ensure ICE_SERVERS loaded before any peers
+  await iceReady;
 
   const roomId = getRoomId();
   const adminPassword = prompt('Enter Admin Password');
@@ -116,8 +160,14 @@ async function startBroadcast() {
   }
 
   try {
+    // mobile-friendly defaults
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
+      video: {
+        facingMode: 'user',
+        width:  { ideal: 640, max: 960 },
+        height: { ideal: 360, max: 540 },
+        frameRate: { ideal: 20, max: 24 }
+      },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     handleNewStream(stream);
@@ -128,10 +178,10 @@ async function startBroadcast() {
   }
 }
 
-// ---------- Share screen ----------
+/* ---------- Share screen ---------- */
 async function shareScreen() {
   try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 25 }, audio: true });
     streamMode = 'slides';
     streamModeLabel.innerText = '📺 Mode: Slides';
     handleNewStream(stream);
@@ -142,11 +192,16 @@ async function shareScreen() {
   }
 }
 
-// ---------- Show event/camera (back camera on phones) ----------
+/* ---------- Show event/camera (back camera on phones) ---------- */
 async function shareEvent() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' },
+      video: {
+        facingMode: 'environment',
+        width:  { ideal: 640, max: 960 },
+        height: { ideal: 360, max: 540 },
+        frameRate: { ideal: 20, max: 24 }
+      },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     streamMode = 'event';
@@ -166,7 +221,12 @@ async function switchCamera() {
     const current = localStream?.getVideoTracks()[0];
     const isBack = current?.getSettings()?.facingMode === 'environment';
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: isBack ? 'user' : 'environment' },
+      video: {
+        facingMode: isBack ? 'user' : 'environment',
+        width:  { ideal: 640, max: 960 },
+        height: { ideal: 360, max: 540 },
+        frameRate: { ideal: 20, max: 24 }
+      },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     handleNewStream(stream);
@@ -176,7 +236,7 @@ async function switchCamera() {
   }
 }
 
-// ---------- Replace tracks on all peers ----------
+/* ---------- Replace tracks on all peers ---------- */
 function handleNewStream(newStream) {
   if (!newStream) return;
 
@@ -198,6 +258,7 @@ function handleNewStream(newStream) {
     if (newVideoTrack) {
       const videoSender = senders.find(s => s.track?.kind === 'video');
       if (videoSender) videoSender.replaceTrack(newVideoTrack);
+      limitBitrate(peer, 600); // re-apply cap after replace
     }
     if (newAudioTrack) {
       const audioSender = senders.find(s => s.track?.kind === 'audio');
@@ -206,9 +267,9 @@ function handleNewStream(newStream) {
   }
 }
 
-// ---------- A viewer (watcher) appears ----------
+/* ---------- A viewer (watcher) appears ---------- */
 socket.on('watcher', async ({ viewerId, viewerName }) => {
-  await iceReady; // be extra-safe when creating a new peer
+  await iceReady;
 
   // If an old peer existed, drop it
   if (peers[viewerId]) {
@@ -223,7 +284,7 @@ socket.on('watcher', async ({ viewerId, viewerName }) => {
     initiator: true,           // broadcaster creates the offer
     trickle: true,             // send ICE incrementally (more reliable/faster)
     stream: localStream,
-    config: { iceServers: ICE_SERVERS }
+    config: { iceServers: ICE_SERVERS, iceTransportPolicy: ICE_POLICY }
   });
 
   // Send our offer/ICE to this viewer
@@ -238,7 +299,10 @@ socket.on('watcher', async ({ viewerId, viewerName }) => {
     if (label && viewerName) label.textContent = `🎙️ ${viewerName}`;
   });
 
-  peer.on('connect', () => console.log(`✅ Connected to ${viewerName || viewerId}`));
+  peer.on('connect', () => {
+    console.log(`✅ Connected to ${viewerName || viewerId}`);
+  });
+
   peer.on('error', err => console.warn('❌ Peer error:', err));
 
   peer.on('close', () => {
@@ -248,7 +312,7 @@ socket.on('watcher', async ({ viewerId, viewerName }) => {
     document.getElementById(viewerId)?.remove();
   });
 
-  // Small control row in your existing list
+  // Store and draw small control row
   peers[viewerId] = peer;
   const li = document.createElement('li');
   li.id = viewerId;
@@ -258,16 +322,20 @@ socket.on('watcher', async ({ viewerId, viewerName }) => {
     <button onclick="grantMic('${viewerId}')">🎤 Allow Mic</button>
     <button onclick="kickViewer('${viewerId}')">❌ Kick</button>`;
   viewerList.appendChild(li);
+
+  // Apply bitrate cap + watch for drops
+  limitBitrate(peer, 600);
+  watchConnection(peer, viewerId);
 });
 
-// ---------- Incoming signals from server (answer/ICE from viewer) ----------
+/* ---------- Incoming signals from server (answer/ICE from viewer) ---------- */
 socket.on('signal', ({ viewerId, signal }) => {
   if (peers[viewerId]) {
     try { peers[viewerId].signal(signal); } catch (e) { console.warn('signal error', e); }
   }
 });
 
-// ---------- Viewer disconnect / kick cleanup ----------
+/* ---------- Viewer disconnect / kick cleanup ---------- */
 socket.on('disconnectPeer', viewerId => {
   if (peers[viewerId]) {
     try { peers[viewerId].destroy(); } catch {}
@@ -277,7 +345,7 @@ socket.on('disconnectPeer', viewerId => {
   document.getElementById(viewerId)?.remove();
 });
 
-// ---------- Live counters / chat / emoji / raise-hand ----------
+/* ---------- Live counters / chat / emoji / raise-hand ---------- */
 socket.on('viewer-count', count => {
   if (viewerCountDisplay) viewerCountDisplay.innerText = `👥 Viewers: ${count}`;
 });
@@ -285,7 +353,7 @@ socket.on('emoji', ({ sender, emoji }) => appendMessage(`🎉 ${sender}: ${emoji
 socket.on('raise-hand', ({ sender }) => appendMessage(`✋ ${sender} raised hand`));
 socket.on('chat', ({ sender, msg }) => appendMessage(`💬 ${sender}: ${msg}`));
 
-// ---------- Broadcaster mic toggle ----------
+/* ---------- Broadcaster mic toggle ---------- */
 function toggleMic() {
   if (!localStream) return;
   const audioTrack = localStream.getAudioTracks()[0];
@@ -295,7 +363,7 @@ function toggleMic() {
   appendMessage(isMicMuted ? '🔇 Mic muted' : '🎤 Mic unmuted');
 }
 
-// ---------- Chat senders ----------
+/* ---------- Chat senders ---------- */
 function sendMessage() {
   const msg = chatInput.value.trim();
   if (!msg) return;
@@ -308,7 +376,7 @@ function sendEmoji(emoji) {
   appendMessage(`🟢 ${getBroadcasterName()}: ${emoji}`); // server doesn't echo to sender
 }
 
-// ---------- Viewer admin controls ----------
+/* ---------- Viewer admin controls ---------- */
 function grantMic(viewerId) {
   socket.emit('grant-mic', viewerId);
   highlightSpeaker(viewerId);

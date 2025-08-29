@@ -1,4 +1,4 @@
-// 📹 viewer.js (WORLD-READY + AUTOPLAY + DIAGNOSTICS + FEEDBACK)
+// 📹 viewer.js (FORCE TURN + AUTOPLAY + DIAGNOSTICS + QUICK REJOIN)
 const socket = io();
 
 let peer = null;
@@ -25,7 +25,6 @@ const MAX_LOGS = 200;
 });
 
 // 🌍 ICE servers (hard-coded Metered.ca)
-// Put this near the top of viewer.js (and remove any fetch('/turn') code)
 const ICE_SERVERS = [
   { urls: 'stun:stun.relay.metered.ca:80' },
   { urls: 'turn:global.relay.metered.ca:80',                 username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
@@ -33,10 +32,8 @@ const ICE_SERVERS = [
   { urls: 'turn:global.relay.metered.ca:443',                username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
   { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
 ];
-
-// keep any code that awaits iceReady happy
-const iceReady = Promise.resolve();
-
+const ICE_POLICY = 'relay'; // 🔒 force TURN for reliability
+const iceReady = Promise.resolve(); // keep any await paths happy
 
 // ===== DOM =====
 const mainVideo = document.getElementById('mainVideo');   // broadcaster stream (will start muted)
@@ -88,9 +85,7 @@ window.unmuteMain = unmuteMain;
 // ===== VU meter for self mic =====
 let vuCtx, vuAnalyser, vuData, vuRAF;
 function attachSelfVU(stream) {
-  try {
-    cancelAnimationFrame(vuRAF);
-  } catch {}
+  try { cancelAnimationFrame(vuRAF); } catch {}
   try { vuCtx?.close?.(); } catch {}
   if (!stream.getAudioTracks().length) {
     if (selfVuBar) selfVuBar.style.width = '0%';
@@ -113,6 +108,34 @@ function attachSelfVU(stream) {
   }
   tick();
 }
+
+/* ===== QUICK REJOIN support ===== */
+let rejoinTries = 0;
+let rejoinTimer = null;
+
+function clearRejoin() {
+  rejoinTries = 0;
+  clearTimeout(rejoinTimer);
+  rejoinTimer = null;
+}
+
+function fullRejoin(reason = 'rejoin') {
+  console.warn('Rejoining due to:', reason);
+  try { peer?.destroy(); } catch {}
+  peer = null;
+  setDiag('-', 'rejoining');
+  // create a fresh RTCPeerConnection and announce presence so broadcaster offers again
+  ensurePeer();
+  if (roomId) socket.emit('watcher', { roomId, viewerName });
+}
+
+function scheduleRejoin(reason) {
+  clearTimeout(rejoinTimer);
+  rejoinTries = Math.min(rejoinTries + 1, 6);
+  const delay = Math.min(5000, 800 * rejoinTries); // backoff up to 5s
+  rejoinTimer = setTimeout(() => fullRejoin(reason), delay);
+}
+
 // ===== Peer lifecycle =====
 function ensurePeer() {
   if (peer) return peer;
@@ -123,7 +146,7 @@ function ensurePeer() {
     stream: localStream,
     config: {
       iceServers: ICE_SERVERS,
-      // iceTransportPolicy: 'relay', // <-- uncomment to force TURN during testing
+      iceTransportPolicy: ICE_POLICY, // 🚦 force TURN
     }
   });
 
@@ -142,32 +165,100 @@ function ensurePeer() {
   peer.on('connect', () => {
     console.log('✅ Viewer connected to broadcaster');
     setDiag(undefined, 'connected');
+    clearRejoin();
   });
 
   peer.on('error', (err) => {
     console.warn('❌ Viewer peer error:', err);
-    showBanner('Network issue with the live stream. Retrying may help.');
+    showBanner('Network issue with the live stream. Reconnecting…');
+    scheduleRejoin('peer-error');
   });
 
   peer.on('close', () => {
     setDiag(undefined, 'closed');
     peer = null;
     mainVideo.srcObject = null;
-    showBanner('Live stream ended or connection closed.');
+    showBanner('Connection dropped. Reconnecting…');
+    scheduleRejoin('peer-close');
   });
 
-  // Diagnostics from RTCPeerConnection
+  // Diagnostics + ICE restart try, then full rejoin
   setTimeout(() => {
     const pc = peer?._pc;
     if (!pc) return;
     setDiag(pc.iceConnectionState, pc.connectionState);
-    pc.oniceconnectionstatechange = () => setDiag(pc.iceConnectionState, pc.connectionState);
-    pc.onconnectionstatechange = () => setDiag(pc.iceConnectionState, pc.connectionState);
+    pc.oniceconnectionstatechange = () => {
+      setDiag(pc.iceConnectionState, pc.connectionState);
+      const st = pc.iceConnectionState;
+      if (st === 'failed' || st === 'disconnected') {
+        try { pc.restartIce && pc.restartIce(); } catch {}
+        scheduleRejoin('ice-state-' + st);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      setDiag(pc.iceConnectionState, pc.connectionState);
+      const st = pc.connectionState;
+      if (st === 'failed' || st === 'disconnected') {
+        try { pc.restartIce && pc.restartIce(); } catch {}
+        scheduleRejoin('conn-state-' + st);
+      }
+    };
   }, 0);
 
   return peer;
 }
 
+// ===== Join Broadcast =====
+async function joinBroadcast() {
+  await iceReady;
+
+  roomId = document.getElementById('roomId')?.value.trim();
+  viewerName = document.getElementById('viewerName')?.value.trim() || 'Anonymous';
+  if (!roomId) return alert('Please enter Room ID');
+
+  try {
+    // mobile-friendly capture (keeps uplink light)
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width:  { ideal: 640, max: 960 },
+        height: { ideal: 360, max: 540 },
+        frameRate: { ideal: 20, max: 24 }
+      },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+
+    selfVideo.srcObject = localStream;
+    selfVideo.play?.().catch(() => {});
+
+    // Start with mic ON (host can mute you / you can toggle)
+    const a = localStream.getAudioTracks()[0];
+    if (a) a.enabled = true;
+    isMicMuted = false;
+    if (micToggleBtn) micToggleBtn.innerText = '🎧 Mute';
+
+    attachSelfVU(localStream);
+
+    // Prepare peer first, then announce to get an offer
+    ensurePeer();
+    socket.emit('watcher', { roomId, viewerName });
+    showBanner('Joining room…');
+
+  } catch (err) {
+    alert('Error accessing camera/mic: ' + err.message);
+  }
+}
+
+// ===== Signaling from broadcaster → feed into peer =====
+socket.on('signal', ({ viewerId, signal }) => {
+  const p = ensurePeer();
+  try {
+    p.signal(signal);
+  } catch (e) {
+    console.warn('signal apply error:', e);
+    scheduleRejoin('signal-error');
+  }
+});
 
 // ===== Stream mode & counts =====
 socket.on('stream-mode', (mode) => {
@@ -235,6 +326,7 @@ socket.on('disconnectPeer', () => {
   peer = null;
   mainVideo.srcObject = null;
   appendMessage('❌ Broadcaster disconnected.');
+  scheduleRejoin('broadcaster-disconnect');
 });
 
 // ===== Feedback sender =====
