@@ -12,12 +12,21 @@ let activeSpeaker = null;
    - Keep TURN username/password on the server (Render env vars)
    - Works with Metered, Xirsys, Twilio, etc.
 ----------------------------------------------------------- */
-let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+/* -----------------------------------------------------------
+   🔐 ICE servers (hard-coded Metered.ca)
+   – No /turn fetch needed
+----------------------------------------------------------- */
+let ICE_SERVERS = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80',                 username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp',   username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turn:global.relay.metered.ca:443',                username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+];
 
-const iceReady = fetch('/turn')
-  .then(r => r.json())
-  .then(cfg => { if (cfg && cfg.iceServers) ICE_SERVERS = cfg.iceServers; })
-  .catch(() => { /* fallback STUN only if /turn fails */ });
+// keep the await path happy
+const iceReady = Promise.resolve();
+
 
 // DOM references
 const mainVideo = document.getElementById('mainVideo');

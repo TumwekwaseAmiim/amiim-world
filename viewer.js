@@ -24,27 +24,19 @@ const MAX_LOGS = 200;
   };
 });
 
-// 🌍 ICE servers (replace TURN creds in production)
+// 🌍 ICE servers (hard-coded Metered.ca)
+// Put this near the top of viewer.js (and remove any fetch('/turn') code)
 const ICE_SERVERS = [
-  { urls: ['stun:turn.your-domain.com:3478', 'stun:turn.your-domain.com:5349'] },
-  {
-    urls: [
-      'turns:turn.your-domain.com:443?transport=tcp',
-      'turns:turn.your-domain.com:5349?transport=tcp'
-    ],
-    username: 'YOUR_TURN_USER',
-    credential: 'YOUR_TURN_PASS'
-  },
-  {
-    urls: [
-      'turn:turn.your-domain.com:3478?transport=udp',
-      'turn:turn.your-domain.com:3478?transport=tcp'
-    ],
-    username: 'YOUR_TURN_USER',
-    credential: 'YOUR_TURN_PASS'
-  },
-  { urls: 'stun:stun.l.google.com:19302' }
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80',                 username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp',   username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turn:global.relay.metered.ca:443',                username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'c10fef4f728d103ac4fb86a5', credential: 'nYWUZ4YNEIggzGKM' },
 ];
+
+// keep any code that awaits iceReady happy
+const iceReady = Promise.resolve();
+
 
 // ===== DOM =====
 const mainVideo = document.getElementById('mainVideo');   // broadcaster stream (will start muted)
