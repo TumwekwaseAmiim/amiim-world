@@ -1,4 +1,4 @@
-// ====== Broadcaster-side script.js (FIXED + RECORDING) ======
+// ====== Broadcaster-side script.js (FIXED + RECORDING + Dynamic TURN) ======
 const socket = io();
 let peers = {};                  // viewerId -> SimplePeer
 let localStream = null;
@@ -7,32 +7,17 @@ let streamMode = 'slides';
 let isMicMuted = false;
 let activeSpeaker = null;
 
-/**
- * 🌍 ICE servers for global reliability (replace with your TURN creds in production)
- * For quick tests you can keep only the Google STUN line below.
- */
-const ICE_SERVERS = [
-  // Your STUN/TURN (replace placeholders when ready)
-  { urls: ['stun:turn.your-domain.com:3478', 'stun:turn.your-domain.com:5349'] },
-  {
-    urls: [
-      'turns:turn.your-domain.com:443?transport=tcp',
-      'turns:turn.your-domain.com:5349?transport=tcp'
-    ],
-    username: 'YOUR_TURN_USER',
-    credential: 'YOUR_TURN_PASS'
-  },
-  {
-    urls: [
-      'turn:turn.your-domain.com:3478?transport=udp',
-      'turn:turn.your-domain.com:3478?transport=tcp'
-    ],
-    username: 'YOUR_TURN_USER',
-    credential: 'YOUR_TURN_PASS'
-  },
-  // (Optional fallback) Often blocked in some regions but fine for testing
-  { urls: 'stun:stun.l.google.com:19302' }
-];
+/* -----------------------------------------------------------
+   🔐 Load ICE servers from your backend (/turn)
+   - Keep TURN username/password on the server (Render env vars)
+   - Works with Metered, Xirsys, Twilio, etc.
+----------------------------------------------------------- */
+let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+const iceReady = fetch('/turn')
+  .then(r => r.json())
+  .then(cfg => { if (cfg && cfg.iceServers) ICE_SERVERS = cfg.iceServers; })
+  .catch(() => { /* fallback STUN only if /turn fails */ });
 
 // DOM references
 const mainVideo = document.getElementById('mainVideo');
@@ -109,6 +94,8 @@ function removeViewerTile(viewerId) {
 
 // ---------- Start broadcast ----------
 async function startBroadcast() {
+  await iceReady; // ensure ICE_SERVERS loaded before any peers
+
   const roomId = getRoomId();
   const adminPassword = prompt('Enter Admin Password');
   if (adminPassword !== 'amiim2025') return alert('Access Denied');
@@ -211,7 +198,9 @@ function handleNewStream(newStream) {
 }
 
 // ---------- A viewer (watcher) appears ----------
-socket.on('watcher', ({ viewerId, viewerName }) => {
+socket.on('watcher', async ({ viewerId, viewerName }) => {
+  await iceReady; // be extra-safe when creating a new peer
+
   // If an old peer existed, drop it
   if (peers[viewerId]) {
     try { peers[viewerId].destroy(); } catch {}
@@ -327,7 +316,7 @@ function highlightSpeaker(viewerId) {
   if (micSpan) micSpan.innerText = '🔊';
 }
 
-// ====== RECORDING MODULE ======
+/* ===================== RECORDING MODULE ===================== */
 let mediaRecorder = null;
 let recChunks = [];
 let recTimerId = null;
@@ -555,8 +544,8 @@ async function recStart() {
     }
 
     // cleanup extra tracks if source was camera/screen (not main)
-    const src = elRecSource?.value || 'main';
-    if (src !== 'main') {
+    const srcSel = elRecSource?.value || 'main';
+    if (srcSel !== 'main') {
       try { recStream.getTracks().forEach(t => t.stop()); } catch {}
     }
     recStream = null;

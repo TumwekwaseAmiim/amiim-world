@@ -12,18 +12,14 @@ const io = new Server(server); // same-origin default
 // --- Static assets ---
 app.use(express.static(path.join(__dirname))); // serve project root
 app.use('/lib', express.static(path.join(__dirname, 'node_modules'))); // /lib/simple-peer/...
-
-// Basic body parser in case you later POST JSON to routes
-app.use(express.json());
+app.use(express.json()); // (optional) for JSON POSTs
 
 // --- Routes ---
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/viewer', (req, res) => res.sendFile(path.join(__dirname, 'viewer.html')));
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/viewer', (_req, res) => res.sendFile(path.join(__dirname, 'viewer.html')));
 
-// Quick health endpoint for Render/uptime checks
+// Health/Status endpoints
 app.get('/health', (_req, res) => res.status(200).send('OK'));
-
-// Status with room and viewer counts
 app.get('/status', (_req, res) => {
   const snapshot = {};
   for (const [roomId, room] of Object.entries(rooms)) {
@@ -34,6 +30,34 @@ app.get('/status', (_req, res) => {
     };
   }
   res.json({ rooms: snapshot, serverTime: new Date().toISOString() });
+});
+
+/* ------------------------- TURN/ICE endpoint -------------------------
+   Keep TURN creds on the server (Render env vars):
+     - TURN_HOSTS     comma-separated list of turn/turns URLs (no spaces)
+     - TURN_USERNAME  your Metered username
+     - TURN_PASSWORD  your Metered password
+   The client fetches /turn and uses the returned iceServers.
+--------------------------------------------------------------------- */
+app.get('/turn', (_req, res) => {
+  const hosts = (process.env.TURN_HOSTS || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+
+  // Include a couple of STUNs so ICE can start even if TURN blocked briefly.
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' } // optional, nice to have with Metered
+  ];
+
+  if (hosts.length && process.env.TURN_USERNAME && process.env.TURN_PASSWORD) {
+    iceServers.push({
+      urls: hosts,
+      username: process.env.TURN_USERNAME,
+      credential: process.env.TURN_PASSWORD
+    });
+  }
+
+  res.json({ iceServers });
 });
 
 // --- Room state ---
@@ -129,10 +153,6 @@ io.on('connection', (socket) => {
   });
 
   // ---- WebRTC signaling ----
-  // Supports:
-  //  - Broadcaster -> Viewer: { roomId, viewerId, signal }
-  //  - Viewer -> Broadcaster: { roomId, signal }
-  //  - Legacy direct (broadcaster only): { targetId, signal }
   socket.on('signal', (payload = {}) => {
     try {
       const { roomId } = payload;
@@ -200,18 +220,16 @@ io.on('connection', (socket) => {
     safeEmit(room.broadcaster, 'disconnectPeer', viewerId);
   });
 
-  // ---- Stream mode change (anyone can reflect, but we keep it simple: broadcaster sets mode) ----
+  // ---- Stream mode change (broadcaster controls) ----
   socket.on('stream-mode', ({ roomId, mode }) => {
     if (!roomId || !rooms[roomId]) return;
-    // Only allow broadcaster to change the canonical mode
     if (rooms[roomId].broadcaster !== socket.id) return;
     rooms[roomId].mode = mode === 'event' ? 'event' : 'slides';
     io.to(roomId).emit('stream-mode', rooms[roomId].mode);
     console.log(`🔄 Stream mode in ${roomId} → ${rooms[roomId].mode}`);
   });
 
-  // ---- Optional: collect client feedback / logs (from your “Send Feedback” button) ----
-  // payload: { text, env, lastConsole }
+  // ---- Optional feedback collector ----
   socket.on('clientFeedback', (payload = {}) => {
     const roomId = socket.roomId;
     if (!roomId || !rooms[roomId]) return;
@@ -224,7 +242,6 @@ io.on('connection', (socket) => {
       lastConsole: payload.lastConsole || null
     };
     rooms[roomId].feedback.push(entry);
-    // keep last 100 feedback entries
     if (rooms[roomId].feedback.length > 100) rooms[roomId].feedback.shift();
     console.log('📝 Feedback:', roomId, entry);
     safeEmit(rooms[roomId].broadcaster, 'feedback', entry);
@@ -252,10 +269,7 @@ io.on('connection', (socket) => {
     if (room.viewers.has(socket.id)) {
       console.log(`👤 Viewer "${room.viewers.get(socket.id)}" left room: ${roomId}`);
       room.viewers.delete(socket.id);
-
-      // tell broadcaster to remove peer/tile
       if (room.broadcaster) safeEmit(room.broadcaster, 'disconnectPeer', socket.id);
-
       broadcastRoomState(roomId);
     }
   });
