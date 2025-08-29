@@ -113,26 +113,30 @@ function attachSelfVU(stream) {
   }
   tick();
 }
-
 // ===== Peer lifecycle =====
 function ensurePeer() {
   if (peer) return peer;
 
   peer = new SimplePeer({
-    initiator: false,          // broadcaster is initiator
+    initiator: false,          // viewer = not initiator
     trickle: true,
     stream: localStream,
-    config: { iceServers: ICE_SERVERS }
+    config: {
+      iceServers: ICE_SERVERS,
+      // iceTransportPolicy: 'relay', // <-- uncomment to force TURN during testing
+    }
   });
 
+  // send our answer/ICE to server
   peer.on('signal', (outSignal) => {
     if (!roomId) return;
     socket.emit('signal', { roomId, signal: outSignal });
   });
 
+  // receive broadcaster media
   peer.on('stream', (remoteStream) => {
     mainVideo.srcObject = remoteStream;
-    ensureMainPlayback();
+    ensureMainPlayback?.();
   });
 
   peer.on('connect', () => {
@@ -152,7 +156,7 @@ function ensurePeer() {
     showBanner('Live stream ended or connection closed.');
   });
 
-  // Diagnostics from RTCPeerConnection if available
+  // Diagnostics from RTCPeerConnection
   setTimeout(() => {
     const pc = peer?._pc;
     if (!pc) return;
@@ -164,46 +168,6 @@ function ensurePeer() {
   return peer;
 }
 
-// ===== Join Broadcast =====
-async function joinBroadcast() {
-  roomId = document.getElementById('roomId')?.value.trim();
-  viewerName = document.getElementById('viewerName')?.value.trim() || 'Anonymous';
-  if (!roomId) return alert('Please enter Room ID');
-
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    });
-    selfVideo.srcObject = localStream;
-    selfVideo.play?.().catch(() => {});
-
-    // Start with mic ON (you can toggle)
-    const a = localStream.getAudioTracks()[0];
-    if (a) a.enabled = true;
-    isMicMuted = false;
-    if (micToggleBtn) micToggleBtn.innerText = '🎧 Mute';
-
-    attachSelfVU(localStream);
-
-    // Tell server we joined
-    socket.emit('watcher', { roomId, viewerName });
-    showBanner('Joining room…');
-
-  } catch (err) {
-    alert('Error accessing camera/mic: ' + err.message);
-  }
-}
-
-// ===== Signaling from broadcaster → feed into peer =====
-socket.on('signal', ({ viewerId, signal }) => {
-  const p = ensurePeer();
-  try {
-    p.signal(signal);
-  } catch (e) {
-    console.warn('signal apply error:', e);
-  }
-});
 
 // ===== Stream mode & counts =====
 socket.on('stream-mode', (mode) => {
