@@ -78,10 +78,10 @@
       <div id="selfVu" aria-hidden="true"><div id="selfVuBar"></div></div>
     </div>
 
-    <!-- Broadcaster stream: we show an unmute overlay to comply with autoplay policies -->
+    <!-- Broadcaster stream: start muted for autoplay, unmute via overlay -->
     <div class="stack">
       <label for="mainVideo"><strong>Live from Broadcaster</strong></label>
-      <video id="mainVideo" autoplay playsinline></video>
+      <video id="mainVideo" autoplay playsinline muted></video>
       <button id="unmuteBtn" class="overlay-btn" onclick="unmuteMain()">🔊 Tap to unmute</button>
     </div>
   </section>
@@ -110,9 +110,9 @@
   </section>
 
   <!-- 📜 Scripts: Socket.IO → SimplePeer → your app -->
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="/socket.io/socket.io.js" defer></script>
   <!-- NOTE: server maps /lib -> node_modules, so SimplePeer is under /lib/simple-peer/ -->
-  <script src="/lib/simple-peer/simplepeer.min.js"></script>
-  <script src="viewer.js"></script>
+  <script src="/lib/simple-peer/simplepeer.min.js" defer></script>
+  <script src="viewer.js" defer></script>
 </body>
 </html>
